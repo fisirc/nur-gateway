@@ -15,11 +15,15 @@ pub fn build(b: *std.Build) void {
     // set a preferred release mode, allowing the user to decide how to optimize.
     const optimize = b.standardOptimizeOption(.{});
 
+    const zzz_mod = b.dependency("zzz", .{}).module("zzz");
+
     const check_mod = b.createModule(.{
         .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
     });
+
+    check_mod.addImport("zzz", zzz_mod);
 
     const check_exe = b.addExecutable(.{
         .name = "cook_check",
@@ -39,6 +43,8 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+
+    exe_mod.addImport("zzz", zzz_mod);
 
     // This creates another `std.Build.Step.Compile`, but this one builds an executable
     // rather than a static library.
