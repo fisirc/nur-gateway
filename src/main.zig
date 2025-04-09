@@ -4,17 +4,18 @@ const thwomp = @import("lib/stomp/lib.zig");
 pub fn main() !void {
     const test_str =
         \\SEND
-        \\is
-        \\ some text
-        \\ EOL
+        \\key:value
         \\
     ;
 
-    var buffer: [4096]u8 = @splat(0);
-    var fba = std.heap.FixedBufferAllocator.init(buffer[0..]);
-    const lexemes = try thwomp.Lexer.tokenizeAll(test_str, fba.allocator());
-    std.debug.print("lexemes:\n{any}\n", .{
-        lexemes,
+    var alloc_buffer: [4096]u8 = @splat(0);
+    var fba = std.heap.FixedBufferAllocator.init(alloc_buffer[0..]);
+
+    const frame = try thwomp.Parser.parseData(test_str, fba.allocator());
+    std.debug.print("frame command: {}\n", .{
+        frame.command,
     });
+
+    const key_iter = frame.hvs.?.keyIterator();
 }
 
