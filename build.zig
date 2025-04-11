@@ -16,6 +16,11 @@ pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
 
     const zzz_mod = b.dependency("zzz", .{}).module("zzz");
+    const libthwomp_mod = b.createModule(.{
+        .root_source_file = b.path("src/lib/stomp/lib.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
 
     const check_mod = b.createModule(.{
         .root_source_file = b.path("src/main.zig"),
@@ -24,6 +29,7 @@ pub fn build(b: *std.Build) void {
     });
 
     check_mod.addImport("zzz", zzz_mod);
+    check_mod.addImport("libthwomp", libthwomp_mod);
 
     const check_exe = b.addExecutable(.{
         .name = "cook_check",
@@ -45,6 +51,7 @@ pub fn build(b: *std.Build) void {
     });
 
     exe_mod.addImport("zzz", zzz_mod);
+    exe_mod.addImport("libthwomp", libthwomp_mod);
 
     // This creates another `std.Build.Step.Compile`, but this one builds an executable
     // rather than a static library.
@@ -85,6 +92,11 @@ pub fn build(b: *std.Build) void {
         .root_module = exe_mod,
     });
 
+    const libthwomp_unit_tests = b.addTest(.{
+        .root_module = libthwomp_mod,
+    });
+
+    const run_libthwomp_unit_tests = b.addRunArtifact(libthwomp_unit_tests);
     const run_exe_unit_tests = b.addRunArtifact(exe_unit_tests);
 
     // Similar to creating the run step earlier, this exposes a `test` step to
@@ -92,4 +104,5 @@ pub fn build(b: *std.Build) void {
     // running the unit tests.
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_exe_unit_tests.step);
+    test_step.dependOn(&run_libthwomp_unit_tests.step);
 }

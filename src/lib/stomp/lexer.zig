@@ -91,7 +91,9 @@ pub fn tokenizeAll(data: []const u8, alloc: std.mem.Allocator) ![]Lexeme {
                     if (prev == '\r') {
                         _ = dyn_buffer.pop();
                     }
+                }
 
+                if (dyn_buffer.items.len != 0) {
                     try clearBuffer(&dyn_buffer, &dyn_lexeme);
                 }
 
@@ -108,6 +110,14 @@ pub fn tokenizeAll(data: []const u8, alloc: std.mem.Allocator) ![]Lexeme {
 
             else => try dyn_buffer.append(data_byte),
         }
+    }
+
+    if (dyn_buffer.items.len != 0) {
+        if (prev == '\r') {
+            _ = dyn_buffer.pop();
+        }
+
+        try clearBuffer(&dyn_buffer, &dyn_lexeme);
     }
 
     return try dyn_lexeme.toOwnedSlice();
