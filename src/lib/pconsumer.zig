@@ -43,13 +43,13 @@ pub fn Queue(message_type: type) type {
             defer self.data_lock.unlock();
 
             var items = self.buffer.items[self.next_node..];
-            while (items.len == 0) {
+            while (items.len == 0) : (items = self.buffer.items[self.next_node..]) {
                 self.cond_data_lock.wait(&self.data_lock);
-                items = self.buffer.items[self.next_node..];
             }
 
+            const msg = items[0];
             self.next_node += 1;
-            return items[0];
+            return msg;
         }
     };
 }

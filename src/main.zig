@@ -1,37 +1,27 @@
 const std = @import("std");
 const thwomp = @import("libthwomp");
+const server = @import("lib/server.zig");
+
+fn handleConn(connection: *std.net.Server.Connection) void {
+    connection.stream.writeAll("mierda!!!\n") catch |err| {
+        std.log.err("[ERROR]: bro wtf no pude escribir: {}\n", .{err});
+        return;
+    };
+
+    connection.stream.close();
+}
 
 pub fn main() !void {
-    const test_str =
-        "SEND" ++ "\r\n" ++
-        "key:value" ++ "\r\n" ++
-        "key2:value2" ++ "\n" ++
-        "\n" ++
-        "this is the body" ++ [_]u8{ 0 } ++
-        "\n"
-    ;
+    var gpa = std.heap.GeneralPurposeAllocator(.{
+        .thread_safe = true,
+    }){};
 
-    var alloc_buffer: [4096]u8 = @splat(0);
-    var fba = std.heap.FixedBufferAllocator.init(alloc_buffer[0..]);
-
-    const frame = try thwomp.Parser.parseData(test_str, fba.allocator());
-    std.debug.print("frame: {any}\n", .{
-        frame.command,
-    });
-
-    if (frame.hvs) |frames| {
-        var key_iter = frames.keyIterator();
-        while (key_iter.next()) |key_ptr| {
-            std.debug.print("key: {s} value: {s}\n", .{
-                key_ptr.*,
-                frame.hvs.?.get(key_ptr.*).?,
-            });
-        }
-    }
-
-    const body = try frame.getBody();
-    std.debug.print("body: {s}\n", .{
-        body.?
-    });
+    var srv: server.TcpServer = .default(gpa.allocator());
+    try srv.listen(.{
+        .hostname = "0.0.0.0"
+    }, handleConn);
 }
+
+
+
 
