@@ -1,3 +1,0 @@
-[submodule "deps/zzz"]
-	path = deps/zzz
-	url = git@github.com:tardy-org/zzz.git
