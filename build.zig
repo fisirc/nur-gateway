@@ -15,7 +15,6 @@ pub fn build(b: *std.Build) void {
     // set a preferred release mode, allowing the user to decide how to optimize.
     const optimize = b.standardOptimizeOption(.{});
 
-    const zzz_mod = b.dependency("zzz", .{}).module("zzz");
     const libthwomp_mod = b.createModule(.{
         .root_source_file = b.path("src/lib/stomp/lib.zig"),
         .target = target,
@@ -28,7 +27,6 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
-    check_mod.addImport("zzz", zzz_mod);
     check_mod.addImport("libthwomp", libthwomp_mod);
 
     const check_exe = b.addExecutable(.{
@@ -50,7 +48,6 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
-    exe_mod.addImport("zzz", zzz_mod);
     exe_mod.addImport("libthwomp", libthwomp_mod);
 
     // This creates another `std.Build.Step.Compile`, but this one builds an executable
