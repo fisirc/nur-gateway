@@ -20,14 +20,19 @@ fn gatekeep(server: *std.net.Server, conn_pool: *pconsumer.Queue(Connection)) vo
     }
 }
 
-fn loopPullAndHandle(conn_pool: *pconsumer.Queue(Connection), handler: HandlerType) void {
+fn loopPullAndHandle(thrd_pool: *std.Thread.Pool, conn_pool: *pconsumer.Queue(Connection), handler: HandlerType) void {
     while (true) {
         var conn = conn_pool.pullMsg() catch |err| {
             std.log.err("[ERROR] couldn't pull message from queue: {}\n", .{ err });
             continue;
         };
 
-        handler(&conn);
+        thrd_pool.spawn(handler, .{
+            &conn,
+        }) catch |err| {
+            std.log.err("[ERROR] deploy handler thread from pool: {}\n", .{ err });
+            continue;
+        };
     }
 }
 
@@ -49,7 +54,6 @@ pub const TcpServer = struct {
 
     pub fn listen(self: *Self, options: Options, handler: HandlerType) !void {
         const gatekeepers = 4;
-        const handlers = 4;
 
         var new_pool: std.Thread.Pool = undefined;
         try new_pool.init(.{
@@ -73,17 +77,7 @@ pub const TcpServer = struct {
             });
         }
 
-        for (0..handlers) |_| {
-            try new_pool.spawn(loopPullAndHandle, .{
-                &queue,
-                handler,
-            });
-        }
-
-        for (0..keeper_threads.len) |index| {
-            keeper_threads[index].join();
-        }
-
+        loopPullAndHandle(&new_pool, &queue, handler);
         return;
     }
 };
