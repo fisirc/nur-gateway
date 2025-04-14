@@ -23,6 +23,11 @@ portability issues
 Will probably maintain sime kind of configuration file format using a structured
 human readable language like toml but not there yet either lmao!!!!
 
+### To-Do
+
+- [ ] implement the actual tcp protocol
+- [ ] add the "escaped" chars parser
+- [ ] migrate the tcp server to tardy or some other async runtime
 
 
 

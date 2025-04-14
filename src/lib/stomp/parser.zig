@@ -5,6 +5,7 @@ const Frame = @import("frame.zig").Msg;
 const ParseError = error {
     InvalidFrame,
     InvalidHeader,
+    InvalidBody,
     UnreachableLexeme,
 };
 
@@ -16,6 +17,23 @@ fn fillKVheader(kv: *std.StringHashMap([]u8), line: []u8) !void {
     const value = split.next() orelse return ParseError.InvalidHeader;
 
     try kv.put(@constCast(head), @constCast(value));
+}
+
+pub fn parseBody(proto: []u8) !?[]u8 {
+    if (std.mem.indexOfScalar(u8, proto, 0)) |null_index| {
+        const body = proto[0..null_index];
+        if (body.len == 0) return null;
+
+        return body;
+    } else {
+        return ParseError.InvalidBody;
+    }
+}
+
+pub fn parseBodyWithSize(proto: []u8, body_size: usize) !?[]u8 {
+    if (proto.len < body_size) return ParseError.InvalidBody;
+
+    return proto[0..body_size];
 }
 
 pub fn parseData(data: []const u8, alloc: std.mem.Allocator) !Frame {
@@ -69,7 +87,20 @@ pub fn parseData(data: []const u8, alloc: std.mem.Allocator) !Frame {
         .string => |bytes| try dyn_buffer.appendSlice(bytes),
     };
 
-    frame.__body_proto = try dyn_buffer.toOwnedSlice();
+    const body_buffer = try dyn_buffer.toOwnedSlice();
+    frame.body = body_val: {
+        if (frame.hvs) |*hvs| {
+            if (hvs.contains("content-length")) {
+                const size = try std.fmt.parseInt(usize, body_buffer, 10);
+                break :body_val try parseBodyWithSize(body_buffer, size);
+            } else {
+                break :body_val try parseBody(body_buffer);
+            }
+        } else {
+            break :body_val try parseBody(body_buffer);
+        }
+    };
+
     return frame;
 }
 
@@ -84,10 +115,9 @@ test "parse_minimal_frame" {
     var fba = std.heap.FixedBufferAllocator.init(alloc_buffer[0..]);
 
     const frame = try parseData(test_str, fba.allocator());
-    const body = try frame.getBody();
 
     try std.testing.expect(frame.hvs == null);
-    try std.testing.expect(body == null);
+    try std.testing.expect(frame.body == null);
 }
 
 test "repeating_headers" {
@@ -105,9 +135,7 @@ test "repeating_headers" {
 
     const frame = try parseData(test_str, fba.allocator());
     try std.testing.expectEqualStrings("value", frame.hvs.?.get("key").?);
-
-    const body = try frame.getBody();
-    try std.testing.expect(body == null);
+    try std.testing.expect(frame.body == null);
 }
 
 test "parse_headers_no_body" {
@@ -127,9 +155,7 @@ test "parse_headers_no_body" {
     try std.testing.expectEqualStrings(frame.hvs.?.get("key").?, "value");
     try std.testing.expectEqualStrings(frame.hvs.?.get("key2").?, "value2");
     try std.testing.expectEqualStrings(frame.hvs.?.get("key3").?, "value3");
-
-    const body = try frame.getBody();
-    try std.testing.expect(body == null);
+    try std.testing.expect(frame.body == null);
 }
 
 test "parse_malformed_headers_no_body" {
@@ -161,11 +187,8 @@ test "parse_no_headers_malformed_body" {
     var alloc_buffer: [4096]u8 = @splat(0);
     var fba = std.heap.FixedBufferAllocator.init(alloc_buffer[0..]);
 
-    const frame = try parseData(test_str, fba.allocator());
-    try std.testing.expect(frame.hvs == null);
-
-    const body = frame.getBody();
-    if (body) |_| {
+    const frame = parseData(test_str, fba.allocator());
+    if (frame) |_| {
         return error.ShouldHaveFailed;
     } else |_| {}
 }
@@ -183,13 +206,8 @@ test "parse_headers_malformed_body" {
     var alloc_buffer: [4096]u8 = @splat(0);
     var fba = std.heap.FixedBufferAllocator.init(alloc_buffer[0..]);
 
-    const frame = try parseData(test_str, fba.allocator());
-    try std.testing.expectEqualStrings(frame.hvs.?.get("key").?, "value");
-    try std.testing.expectEqualStrings(frame.hvs.?.get("key2").?, "value2");
-    try std.testing.expectEqualStrings(frame.hvs.?.get("key3").?, "value3");
-
-    const body = frame.getBody();
-    if (body) |_| {
+    const frame = parseData(test_str, fba.allocator());
+    if (frame) |_| {
         return error.ShouldHaveFailed;
     } else |_| {}
 }
@@ -225,9 +243,7 @@ test "parse_no_headers_body" {
 
     const frame = try parseData(test_str, fba.allocator());
     try std.testing.expect(frame.hvs == null);
-
-    const body = try frame.getBody();
-    try std.testing.expectEqualStrings("whatever", body.?);
+    try std.testing.expectEqualStrings("whatever", frame.body.?);
 }
 
 test "parse_headers_body" {
@@ -248,8 +264,7 @@ test "parse_headers_body" {
     try std.testing.expectEqualStrings(frame.hvs.?.get("key2").?, "value2");
     try std.testing.expectEqualStrings(frame.hvs.?.get("key3").?, "value3");
 
-    const body = try frame.getBody();
-    try std.testing.expectEqualStrings("whatever", body.?);
+    try std.testing.expectEqualStrings("whatever", frame.body.?);
 }
 
 test "parse_malformed_headers_body" {

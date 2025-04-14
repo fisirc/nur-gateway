@@ -26,34 +26,9 @@ pub const Command = enum {
 };
 
 pub const Msg = struct {
-    const Self = @This();
-    const MsgParseError = error {
-        InvalidBody,
-    };
-
     command: Command = .invalid,
     hvs: ?std.StringHashMap([]u8) = null,
-    __body_proto: []u8 = &.{},
-
-    pub fn getBody(self: Self) !?[]u8 {
-        const proto = self.__body_proto;
-
-        if (std.mem.indexOfScalar(u8, proto, 0)) |null_index| {
-            const body = proto[0..null_index];
-            if (body.len == 0) return null;
-
-            return body;
-        } else {
-            return MsgParseError.InvalidBody;
-        }
-    }
-
-    pub fn getBodyWithSize(self: Self, body_size: usize) !?[]u8 {
-        const proto = self.__body_proto;
-        if (proto.len < body_size) return MsgParseError.InvalidBody;
-
-        return proto[0..body_size];
-    }
+    body: ?[]u8 = &.{},
 };
 
 
