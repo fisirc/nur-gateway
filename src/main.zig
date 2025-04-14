@@ -22,12 +22,12 @@ fn handleConn(connection: std.net.Server.Connection) void {
     };
 
     const data = buffer[0..read_size];
-    std.debug.print("{s}\n", .{ data });
-
     var frame = libthwomp.parser.parseFrame(data, gpa.allocator()) catch |err| {
         std.log.err("couldn't parse client frame: {}", .{ err });
         return;
     }; defer frame.deinit();
+
+    std.debug.print("{any}\n", .{ frame });
 }
 
 pub fn main() !void {

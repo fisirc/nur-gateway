@@ -21,6 +21,7 @@ fn fillKVheader(kv: *std.StringHashMap([]u8), line: []u8) !void {
     try kv.put(@constCast(head), @constCast(value));
 }
 
+/// performs a copy of the contents of `proto` that's as big as needed
 pub fn parseBody(proto: []u8, alloc: std.mem.Allocator) !?[]u8 {
     if (std.mem.indexOfScalar(u8, proto, 0)) |null_index| {
         const body = proto[0..null_index];
@@ -35,6 +36,7 @@ pub fn parseBody(proto: []u8, alloc: std.mem.Allocator) !?[]u8 {
     }
 }
 
+/// performs a copy of the contents of `proto` that's as big as needed
 pub fn parseBodyWithSize(proto: []u8, body_size: usize, alloc: std.mem.Allocator) !?[]u8 {
     if (proto.len < body_size) return ParseError.InvalidBodyTooSmall;
 
@@ -48,8 +50,10 @@ pub fn parseBodyWithSize(proto: []u8, body_size: usize, alloc: std.mem.Allocator
 pub fn parseFrame(data: []const u8, alloc: std.mem.Allocator) !Frame {
     var frame: Frame = .init(alloc);
 
-    const lexemes = try lexx.tokenizeAll(data, frame.alloc);
-    defer frame.alloc.free(lexemes);
+    var new_arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer new_arena.deinit();
+
+    const lexemes = try lexx.tokenizeAll(data, new_arena.allocator());
 
     if (lexemes.len < 3) return ParseError.InvalidFrame;
 
@@ -76,7 +80,6 @@ pub fn parseFrame(data: []const u8, alloc: std.mem.Allocator) !Frame {
             .string => |str| {
                 if (frame.hvs == null) frame.hvs = std.StringHashMap([]u8).init(frame.alloc);
                 try fillKVheader(&frame.hvs.?, str);
-                frame.alloc.free(str);
 
                 if (offset + 1 >= non_cmd_lexemes.len) return ParseError.InvalidFrame;
 
@@ -93,19 +96,16 @@ pub fn parseFrame(data: []const u8, alloc: std.mem.Allocator) !Frame {
     const body_lexemes = non_cmd_lexemes[offset..];
 
     var dyn_buffer = try std.ArrayList(u8).initCapacity(frame.alloc, body_lexemes.len * @sizeOf(lexx.Lexeme));
+    defer dyn_buffer.deinit();
+
     for (body_lexemes) |lexeme| switch (lexeme) {
         .command => return ParseError.UnreachableLexeme,
         .EOL_lf => |byte| try dyn_buffer.append(byte),
         .EOL_crlf => |bytes| try dyn_buffer.appendSlice(bytes[0..]),
-        .string => |bytes| {
-            try dyn_buffer.appendSlice(bytes);
-            frame.alloc.free(bytes);
-        },
+        .string => |bytes| try dyn_buffer.appendSlice(bytes),
     };
 
-    const body_buffer = try dyn_buffer.toOwnedSlice();
-    defer frame.alloc.free(body_buffer);
-
+    const body_buffer = dyn_buffer.items;
     frame.body = body_val: {
         if (frame.hvs) |*hvs| {
             if (hvs.contains("content-length")) {
