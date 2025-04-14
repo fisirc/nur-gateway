@@ -1,7 +1,7 @@
 const std = @import("std");
 
-pub const Parser = @import("parser.zig");
-test Parser {
+pub const parser = @import("parser.zig");
+test parser {
     _ = @import("parser.zig");
 }
 

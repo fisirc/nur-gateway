@@ -26,9 +26,27 @@ pub const Command = enum {
 };
 
 pub const Msg = struct {
+    const Self = @This();
+
     command: Command = .invalid,
     hvs: ?std.StringHashMap([]u8) = null,
     body: ?[]u8 = &.{},
+
+    alloc: std.mem.Allocator,
+
+    pub fn init(alloc: std.mem.Allocator) Self {
+        return .{ .alloc = alloc };
+    }
+
+    pub fn deinit(self: *Self) void {
+        if (self.body) |body| {
+            self.alloc.free(body);
+        }
+
+        if (self.hvs) |_| {
+            self.hvs.?.deinit();
+        }
+    }
 };
 
 

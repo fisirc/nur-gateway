@@ -4,17 +4,19 @@ const Frame = @import("frame.zig").Msg;
 
 const ParseError = error {
     InvalidFrame,
-    InvalidHeader,
-    InvalidBody,
+    InvalidHeaderString,
+    InvalidHeaderNoSeparator,
+    InvalidBodyTooSmall,
+    InvalidBodyNoNull,
     UnreachableLexeme,
 };
 
 fn fillKVheader(kv: *std.StringHashMap([]u8), line: []u8) !void {
     var split = std.mem.splitScalar(u8, line, ':');
-    const head = split.next() orelse return ParseError.InvalidHeader;
+    const head = split.next() orelse return ParseError.InvalidHeaderString;
     if (kv.contains(head)) return;
 
-    const value = split.next() orelse return ParseError.InvalidHeader;
+    const value = split.next() orelse return ParseError.InvalidHeaderNoSeparator;
 
     try kv.put(@constCast(head), @constCast(value));
 }
@@ -26,21 +28,23 @@ pub fn parseBody(proto: []u8) !?[]u8 {
 
         return body;
     } else {
-        return ParseError.InvalidBody;
+        return ParseError.InvalidBodyNoNull;
     }
 }
 
 pub fn parseBodyWithSize(proto: []u8, body_size: usize) !?[]u8 {
-    if (proto.len < body_size) return ParseError.InvalidBody;
+    if (proto.len < body_size) return ParseError.InvalidBodyTooSmall;
 
     return proto[0..body_size];
 }
 
-pub fn parseData(data: []const u8, alloc: std.mem.Allocator) !Frame {
-    const lexemes = try lexx.tokenizeAll(data, alloc);
+/// memory is owned by caller's allocator
+pub fn parseFrame(data: []const u8, alloc: std.mem.Allocator) !Frame {
+    var frame: Frame = .init(alloc);
+
+    const lexemes = try lexx.tokenizeAll(data, frame.alloc);
     if (lexemes.len < 3) return ParseError.InvalidFrame;
 
-    var frame: Frame = .{};
     switch (lexemes[0]) {
         .command => |cmd| frame.command = cmd,
         else => return ParseError.InvalidFrame,
@@ -62,7 +66,7 @@ pub fn parseData(data: []const u8, alloc: std.mem.Allocator) !Frame {
             },
 
             .string => |str| {
-                if (frame.hvs == null) frame.hvs = std.StringHashMap([]u8).init(alloc);
+                if (frame.hvs == null) frame.hvs = std.StringHashMap([]u8).init(frame.alloc);
                 try fillKVheader(&frame.hvs.?, str);
 
                 if (offset + 1 >= non_cmd_lexemes.len) return ParseError.InvalidFrame;
@@ -79,7 +83,7 @@ pub fn parseData(data: []const u8, alloc: std.mem.Allocator) !Frame {
 
     const body_lexemes = non_cmd_lexemes[offset..];
 
-    var dyn_buffer = try std.ArrayList(u8).initCapacity(alloc, body_lexemes.len * @sizeOf(lexx.Lexeme));
+    var dyn_buffer = try std.ArrayList(u8).initCapacity(frame.alloc, body_lexemes.len * @sizeOf(lexx.Lexeme));
     for (body_lexemes) |lexeme| switch (lexeme) {
         .command => return ParseError.UnreachableLexeme,
         .EOL_lf => |byte| try dyn_buffer.append(byte),
@@ -114,7 +118,7 @@ test "parse_minimal_frame" {
     var alloc_buffer: [4096]u8 = @splat(0);
     var fba = std.heap.FixedBufferAllocator.init(alloc_buffer[0..]);
 
-    const frame = try parseData(test_str, fba.allocator());
+    const frame = try parseFrame(test_str, fba.allocator());
 
     try std.testing.expect(frame.hvs == null);
     try std.testing.expect(frame.body == null);
@@ -133,7 +137,7 @@ test "repeating_headers" {
     var alloc_buffer: [4096]u8 = @splat(0);
     var fba = std.heap.FixedBufferAllocator.init(alloc_buffer[0..]);
 
-    const frame = try parseData(test_str, fba.allocator());
+    const frame = try parseFrame(test_str, fba.allocator());
     try std.testing.expectEqualStrings("value", frame.hvs.?.get("key").?);
     try std.testing.expect(frame.body == null);
 }
@@ -151,7 +155,7 @@ test "parse_headers_no_body" {
     var alloc_buffer: [4096]u8 = @splat(0);
     var fba = std.heap.FixedBufferAllocator.init(alloc_buffer[0..]);
 
-    const frame = try parseData(test_str, fba.allocator());
+    const frame = try parseFrame(test_str, fba.allocator());
     try std.testing.expectEqualStrings(frame.hvs.?.get("key").?, "value");
     try std.testing.expectEqualStrings(frame.hvs.?.get("key2").?, "value2");
     try std.testing.expectEqualStrings(frame.hvs.?.get("key3").?, "value3");
@@ -171,7 +175,7 @@ test "parse_malformed_headers_no_body" {
     var alloc_buffer: [4096]u8 = @splat(0);
     var fba = std.heap.FixedBufferAllocator.init(alloc_buffer[0..]);
 
-    const frame = parseData(test_str, fba.allocator());
+    const frame = parseFrame(test_str, fba.allocator());
     if (frame) |_| {
         return error.ShouldHaveFailed;
     } else |_| {}
@@ -187,7 +191,7 @@ test "parse_no_headers_malformed_body" {
     var alloc_buffer: [4096]u8 = @splat(0);
     var fba = std.heap.FixedBufferAllocator.init(alloc_buffer[0..]);
 
-    const frame = parseData(test_str, fba.allocator());
+    const frame = parseFrame(test_str, fba.allocator());
     if (frame) |_| {
         return error.ShouldHaveFailed;
     } else |_| {}
@@ -206,7 +210,7 @@ test "parse_headers_malformed_body" {
     var alloc_buffer: [4096]u8 = @splat(0);
     var fba = std.heap.FixedBufferAllocator.init(alloc_buffer[0..]);
 
-    const frame = parseData(test_str, fba.allocator());
+    const frame = parseFrame(test_str, fba.allocator());
     if (frame) |_| {
         return error.ShouldHaveFailed;
     } else |_| {}
@@ -225,7 +229,7 @@ test "parse_malformed_headers_malformed_body" {
     var alloc_buffer: [4096]u8 = @splat(0);
     var fba = std.heap.FixedBufferAllocator.init(alloc_buffer[0..]);
 
-    const frame = parseData(test_str, fba.allocator());
+    const frame = parseFrame(test_str, fba.allocator());
     if (frame) |_| {
         return error.ShouldHaveFailed;
     } else |_| {}
@@ -241,7 +245,7 @@ test "parse_no_headers_body" {
     var alloc_buffer: [4096]u8 = @splat(0);
     var fba = std.heap.FixedBufferAllocator.init(alloc_buffer[0..]);
 
-    const frame = try parseData(test_str, fba.allocator());
+    const frame = try parseFrame(test_str, fba.allocator());
     try std.testing.expect(frame.hvs == null);
     try std.testing.expectEqualStrings("whatever", frame.body.?);
 }
@@ -259,7 +263,7 @@ test "parse_headers_body" {
     var alloc_buffer: [4096]u8 = @splat(0);
     var fba = std.heap.FixedBufferAllocator.init(alloc_buffer[0..]);
 
-    const frame = try parseData(test_str, fba.allocator());
+    const frame = try parseFrame(test_str, fba.allocator());
     try std.testing.expectEqualStrings(frame.hvs.?.get("key").?, "value");
     try std.testing.expectEqualStrings(frame.hvs.?.get("key2").?, "value2");
     try std.testing.expectEqualStrings(frame.hvs.?.get("key3").?, "value3");
@@ -280,7 +284,7 @@ test "parse_malformed_headers_body" {
     var alloc_buffer: [4096]u8 = @splat(0);
     var fba = std.heap.FixedBufferAllocator.init(alloc_buffer[0..]);
 
-    const frame = parseData(test_str, fba.allocator());
+    const frame = parseFrame(test_str, fba.allocator());
     if (frame) |_| {
         return error.ShouldHaveFailed;
     } else |_| {}

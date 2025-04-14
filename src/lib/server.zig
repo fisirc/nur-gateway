@@ -2,7 +2,7 @@ const std = @import("std");
 const pconsumer = @import("pconsumer.zig");
 const Connection = std.net.Server.Connection;
 
-const HandlerType = fn (arg0: *Connection) void;
+const HandlerType = fn (arg0: Connection) void;
 
 fn gatekeep(server: *std.net.Server, conn_pool: *pconsumer.Queue(Connection)) void {
     while (true) {
@@ -28,7 +28,7 @@ fn loopPullAndHandle(
     std.log.info("ready for connections", .{});
 
     while (true) {
-        var conn = conn_pool.pullMsg() catch |err| {
+        const conn = conn_pool.pullMsg() catch |err| {
             std.log.err("couldn't pull message from queue: {}", .{ err });
             continue;
         };
@@ -36,7 +36,7 @@ fn loopPullAndHandle(
         std.log.info("connection pulled, deploying handler", .{});
 
         thrd_pool.spawn(handler, .{
-            &conn,
+            conn,
         }) catch |err| {
             std.log.err("couldn't deploy handler thread: {}", .{ err });
             continue;
