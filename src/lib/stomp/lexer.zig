@@ -59,12 +59,12 @@ fn toCommand(str: []const u8) ?Command {
 }
 
 fn clearBuffer(buffer: *std.ArrayList(u8), lexemes: *std.ArrayList(Lexeme)) !void {
-    const buffer_slice = try buffer.toOwnedSlice();
-    if (toCommand(buffer_slice)) |cmd| {
+    if (toCommand(buffer.items)) |cmd| {
         try lexemes.append(Lexeme{
             .command = cmd,
         });
     } else {
+        const buffer_slice = try buffer.toOwnedSlice();
         try lexemes.append(Lexeme{
             .string = buffer_slice,
         });

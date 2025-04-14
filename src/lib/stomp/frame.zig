@@ -39,8 +39,8 @@ pub const Msg = struct {
     }
 
     pub fn deinit(self: *Self) void {
-        if (self.body) |body| {
-            self.alloc.free(body);
+        if (self.body) |_| {
+            self.alloc.free(self.body.?);
         }
 
         if (self.hvs) |_| {

@@ -21,21 +21,27 @@ fn fillKVheader(kv: *std.StringHashMap([]u8), line: []u8) !void {
     try kv.put(@constCast(head), @constCast(value));
 }
 
-pub fn parseBody(proto: []u8) !?[]u8 {
+pub fn parseBody(proto: []u8, alloc: std.mem.Allocator) !?[]u8 {
     if (std.mem.indexOfScalar(u8, proto, 0)) |null_index| {
         const body = proto[0..null_index];
         if (body.len == 0) return null;
 
-        return body;
+        var buffer = try alloc.alloc(u8, null_index);
+        @memcpy(buffer[0..], body);
+
+        return buffer;
     } else {
         return ParseError.InvalidBodyNoNull;
     }
 }
 
-pub fn parseBodyWithSize(proto: []u8, body_size: usize) !?[]u8 {
+pub fn parseBodyWithSize(proto: []u8, body_size: usize, alloc: std.mem.Allocator) !?[]u8 {
     if (proto.len < body_size) return ParseError.InvalidBodyTooSmall;
 
-    return proto[0..body_size];
+    var buffer = try alloc.alloc(u8, body_size);
+    @memcpy(buffer[0..], proto[0..body_size]);
+
+    return buffer;
 }
 
 /// memory is owned by caller's allocator
@@ -43,6 +49,8 @@ pub fn parseFrame(data: []const u8, alloc: std.mem.Allocator) !Frame {
     var frame: Frame = .init(alloc);
 
     const lexemes = try lexx.tokenizeAll(data, frame.alloc);
+    defer frame.alloc.free(lexemes);
+
     if (lexemes.len < 3) return ParseError.InvalidFrame;
 
     switch (lexemes[0]) {
@@ -68,6 +76,7 @@ pub fn parseFrame(data: []const u8, alloc: std.mem.Allocator) !Frame {
             .string => |str| {
                 if (frame.hvs == null) frame.hvs = std.StringHashMap([]u8).init(frame.alloc);
                 try fillKVheader(&frame.hvs.?, str);
+                frame.alloc.free(str);
 
                 if (offset + 1 >= non_cmd_lexemes.len) return ParseError.InvalidFrame;
 
@@ -88,20 +97,25 @@ pub fn parseFrame(data: []const u8, alloc: std.mem.Allocator) !Frame {
         .command => return ParseError.UnreachableLexeme,
         .EOL_lf => |byte| try dyn_buffer.append(byte),
         .EOL_crlf => |bytes| try dyn_buffer.appendSlice(bytes[0..]),
-        .string => |bytes| try dyn_buffer.appendSlice(bytes),
+        .string => |bytes| {
+            try dyn_buffer.appendSlice(bytes);
+            frame.alloc.free(bytes);
+        },
     };
 
     const body_buffer = try dyn_buffer.toOwnedSlice();
+    defer frame.alloc.free(body_buffer);
+
     frame.body = body_val: {
         if (frame.hvs) |*hvs| {
             if (hvs.contains("content-length")) {
                 const size = try std.fmt.parseInt(usize, body_buffer, 10);
-                break :body_val try parseBodyWithSize(body_buffer, size);
+                break :body_val try parseBodyWithSize(body_buffer, size, frame.alloc);
             } else {
-                break :body_val try parseBody(body_buffer);
+                break :body_val try parseBody(body_buffer, frame.alloc);
             }
         } else {
-            break :body_val try parseBody(body_buffer);
+            break :body_val try parseBody(body_buffer, frame.alloc);
         }
     };
 
