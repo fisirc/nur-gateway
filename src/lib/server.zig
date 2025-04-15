@@ -33,7 +33,10 @@ fn loopPullAndHandle(
             continue;
         };
 
-        std.log.info("connection pulled, deploying handler", .{});
+        std.log.info("connection pulled addr({}):fd({}), deploying handler", .{
+            conn.address,
+            conn.stream.handle,
+        });
 
         thrd_pool.spawn(handler, .{
             conn,

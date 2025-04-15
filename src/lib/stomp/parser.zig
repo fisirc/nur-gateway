@@ -49,6 +49,7 @@ pub fn parseBodyWithSize(proto: []u8, body_size: usize, alloc: std.mem.Allocator
 /// memory is owned by caller's allocator
 pub fn parseFrame(data: []const u8, alloc: std.mem.Allocator) !Frame {
     var frame: Frame = .init(alloc);
+    errdefer frame.deinit();
 
     var new_arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer new_arena.deinit();

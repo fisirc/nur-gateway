@@ -4,6 +4,7 @@ const server = @import("lib/server.zig");
 
 fn handleConn(connection: std.net.Server.Connection) void {
     defer connection.stream.close();
+
     const conn_reader = connection.stream.reader().any();
 
     var gpa: std.heap.GeneralPurposeAllocator(.{
@@ -25,7 +26,9 @@ fn handleConn(connection: std.net.Server.Connection) void {
     var frame = libthwomp.parser.parseFrame(data, gpa.allocator()) catch |err| {
         std.log.err("couldn't parse client frame: {}", .{ err });
         return;
-    }; defer frame.deinit();
+    };
+
+    defer frame.deinit();
 
     std.debug.print("{any}\n", .{ frame });
 }
