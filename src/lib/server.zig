@@ -94,8 +94,8 @@ pub const TcpServer = struct {
         }
 
         std.log.info("allocated {} gatekeeper threads", .{keeper_threads.len});
-
         loopPullAndHandle(&new_pool, &queue, handler);
+
         return;
     }
 };
