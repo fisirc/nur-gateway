@@ -11,7 +11,13 @@ fn handleConn(connection: std.net.Server.Connection) void {
         std.log.err("couldn't configure socket into non blocking: {}", .{ err });
     };
 
-    defer connection.stream.close();
+    defer {
+        connection.stream.close();
+        std.log.info("closed connection addr({}):fd({})", .{
+            connection.address,
+            connection.stream.handle,
+        });
+    }
 
     var gpa: std.heap.GeneralPurposeAllocator(.{
         .thread_safe = true,
@@ -49,11 +55,13 @@ fn handleConn(connection: std.net.Server.Connection) void {
     var frame = libthwomp.parser.parseFrame(data, gpa.allocator()) catch |err| {
         std.log.err("couldn't parse client frame: {}", .{ err });
         return;
+    }; defer frame.deinit();
+
+    const conn_writer = connection.stream.writer().any();
+    _ = conn_writer.writeAll("hola huevonazo!!!") catch {
+        std.log.err("couldn't write to the connection", .{});
+        return;
     };
-
-    defer frame.deinit();
-
-    std.debug.print("{any}\n", .{ frame });
 }
 
 pub fn main() !void {
@@ -69,6 +77,7 @@ pub fn main() !void {
     var srv: server.TcpServer = .default(gpa.allocator());
     try srv.listen(.{
         .hostname = "0.0.0.0",
+        .port = 3000,
     }, handleConn);
 }
 
