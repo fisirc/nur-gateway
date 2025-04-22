@@ -25,6 +25,15 @@ pub fn configHandleNoblock(conn: std.net.Server.Connection) !void {
     );
 }
 
+/// closes the underlying connection, do not call this function twice
+pub inline fn closeConnection(conn: std.net.Server.Connection) void {
+    conn.stream.close();
+    std.log.info("closed connection addr({}):fd({})", .{
+        conn.address,
+        conn.stream.handle,
+    });
+}
+
 pub fn writeFrame(frame: Frame, writer: std.io.AnyWriter) !void {
     var buffered_stream = std.io.bufferedWriter(writer);
     const stream_writer = buffered_stream.writer().any();
