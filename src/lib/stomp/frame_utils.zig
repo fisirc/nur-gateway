@@ -4,7 +4,7 @@ const ioutils = @import("ioutils.zig");
 const Frame = @import("frame.zig");
 
 pub fn handshake(reader: std.io.AnyReader, writer: std.io.AnyWriter, handle: std.posix.fd_t) !void {
-    var buffer: [1024 * 4]u8 = @splat(0);
+    var buffer: [1024 * 10]u8 = @splat(0);
     var fba = std.heap.FixedBufferAllocator.init(buffer[0..]);
     const allocator = fba.allocator();
 
