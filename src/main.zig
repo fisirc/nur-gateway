@@ -1,5 +1,7 @@
 const std = @import("std");
 const libthwomp = @import("libthwomp");
+
+const pq = @import("lib/pq.zig");
 const server = @import("lib/server.zig");
 
 const QueueMap = @import("queues.zig").SyncQueueMap;
@@ -22,12 +24,13 @@ const StompServer = struct {
     pub fn handle(connection: std.net.Server.Connection, srv_ctx: *Ctx) void {
         defer libthwomp.ioutils.closeConnection(connection);
 
-        const handle_fd = connection.stream.handle;
-        const conn_reader = connection.stream.reader().any();
-        const conn_writer = connection.stream.writer().any();
+        // const handle_fd = connection.stream.handle;
+        // const conn_reader = connection.stream.reader().any();
+        // const conn_writer = connection.stream.writer().any();
 
         libthwomp.ioutils.configHandleNoblock(connection) catch |err| {
             std.log.err("couldn't configure socket into non blocking: {}", .{ err });
+            return;
         };
 
         var gpa: std.heap.GeneralPurposeAllocator(.{
@@ -39,10 +42,24 @@ const StompServer = struct {
             .ok => {},
         };
 
-        const handler_allocator = gpa.allocator();
+        var header_buffer: [4096]u8 = @splat(0);
+        var ready_server = std.http.Server.init(connection, header_buffer[0..]);
+        const request_with_header = ready_server.receiveHead() catch |err| {
+            std.log.err("couldn't receive http header from connection: {}", .{ err });
+            return;
+        };
 
-        libthwomp.frameutils.handshake(conn_reader, conn_writer, handle_fd) catch |err| {
-            std.log.err("couldn't establish the conn handshake: {}", .{ err });
+        // every (method, target) pair should correspond to a single function id
+        // which will then be passed down to the worker
+        const method = request_with_header.head.method;
+        const target = request_with_header.head.target;
+        _ = method;
+        _ = target;
+
+        const conn = pq.connectDbSafe("postgresql://postgres:3XJ6XVYhh701ybun@db.hgowvvjfbzaayphkktyo.supabase.co:5432/postgres") catch |_| {
+            std.log.err("couldn't establish connection with the db: {}", .{
+                pq.PQGetErrorMessage(),
+            });
             return;
         };
 
