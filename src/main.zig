@@ -53,57 +53,25 @@ const StompServer = struct {
         // which will then be passed down to the worker
         const method = request_with_header.head.method;
         const target = request_with_header.head.target;
-        _ = method;
-        _ = target;
 
-        const conn = pq.connectDbSafe("postgresql://postgres:3XJ6XVYhh701ybun@db.hgowvvjfbzaayphkktyo.supabase.co:5432/postgres") catch |_| {
-            std.log.err("couldn't establish connection with the db: {}", .{
-                pq.PQGetErrorMessage(),
-            });
+        const conn = pq.connectDbSafe("postgresql://postgres:3XJ6XVYhh701ybun@db.hgowvvjfbzaayphkktyo.supabase.co:5432/postgres") catch {
+            std.log.err("couldn't establish connection with the db", .{});
             return;
-        };
+        }; defer pq.finishConn(conn);
 
-        const frame_buffer = handler_allocator.alloc(
-            u8,
-            libthwomp.Frame.max_frame_size,
+        const result = pq.execQueryWithParams(
+            conn,
+            "select function_id from methods m join routes r where m.route_id = r.route_id and r.path_absolute = $1 and m.method_name = $?",
+            .{
+                target,
+                method,
+            },
         ) catch |err| {
-            std.log.err("couldn't allocate frame buffer: {}", .{ err });
+            std.log.err("couldn't execute query: {}", .{ err });
             return;
         };
 
-        defer handler_allocator.free(frame_buffer);
-
-        for (0..1) |_| {
-            const frame_data = libthwomp.ioutils.pollAndRead(
-                handle_fd,
-                conn_reader,
-                frame_buffer,
-            ) catch |err| {
-                std.log.err("couldn't poll and read: {}", .{ err });
-                return;
-            };
-
-            const wrapped_res = libthwomp.parser.parseFrame(
-                frame_data,
-                handler_allocator,
-            ) catch |err| {
-                std.log.err("couldn't parse frame: {}", .{ err });
-                return;
-            };
-
-            defer wrapped_res.deinit();
-
-            switch (wrapped_res.frame.command) {
-                .send => {
-                    srv_ctx.qmap.pushToQueue(wrapped_res.frame.body orelse @constCast(""), @constCast("queue")) catch |err| {
-                        std.log.err("couldn't store message: {}", .{ err });
-                        return;
-                    };
-                },
-
-                else => unreachable,
-            }
-        }
+        // check for rows amount, get text value, start the worker protocol
     }
 };
 
