@@ -40,6 +40,10 @@
             .url = "git+https://github.com/allyourcodebase/libpq?ref=5.16.4+3#b8b3a5acc9d2613ab926e2f7625552bbf9acaf90",
             .hash = "libpq-5.16.4-QME6aVj4AAD9AxF3KV877U06maI3NcEjO_a9T8JJtOG9",
         },
+        .dotenv = .{
+            .url = "git+https://github.com/pandadiestro/dotenv.zig.git#b0f946e9c06879558ccfd0603e3daaa56b6c2739",
+            .hash = "dotenv-1.1.0-eyjU0Sk2AAAC8gbGBRVJBMO_2pVHeh3EJLbZrO3GGwQ-",
+        },
     },
     .paths = .{
         "build.zig",

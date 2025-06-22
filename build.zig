@@ -6,6 +6,9 @@ pub fn build(b: *std.Build) void {
 
     const libpq_dep = b.dependency("libpq", .{});
     const libpq = libpq_dep.artifact("pq");
+
+    const dotenv_dep = b.dependency("dotenv", .{});
+    const dotenv_mod = dotenv_dep.module("dotenv");
     
     const libthwomp_mod = b.createModule(.{
         .root_source_file = b.path("src/lib/stomp/lib.zig"),
@@ -21,6 +24,7 @@ pub fn build(b: *std.Build) void {
 
     check_mod.linkLibrary(libpq);
     check_mod.addImport("libthwomp", libthwomp_mod);
+    check_mod.addImport("dotenv", dotenv_mod);
 
     const check_exe = b.addExecutable(.{
         .name = "cook_check",
@@ -36,8 +40,9 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
-    exe_mod.addImport("libthwomp", libthwomp_mod);
     exe_mod.linkLibrary(libpq);
+    exe_mod.addImport("libthwomp", libthwomp_mod);
+    exe_mod.addImport("dotenv", dotenv_mod);
 
     const exe = b.addExecutable(.{
         .name = "thwomp",

@@ -24,9 +24,23 @@ pub const ExecError = error {
     IsNull,
     QueryError,
     QueryOutOfMemory,
+    EmptyStringParam,
 };
 
 const QueryResult = bindings.PGresult;
+
+/// returns the number of rows returned into some query result
+pub fn resultRowsLen(result: *QueryResult) usize {
+    const n_tuples: c_int = bindings.PQntuples(result);
+    return @intCast(n_tuples);
+}
+
+/// return the value located at column `col_idx` of the row `row_idx` (starting at 0) from the result (which owns the memory)
+pub fn getValueAt(result: *QueryResult, row_idx: usize, col_idx: usize) []const u8 {
+    const value_textformat = bindings.PQgetvalue(result, @intCast(row_idx), @intCast(col_idx));
+    const value_textlength = std.mem.len(value_textformat);
+    return value_textformat[0..value_textlength];
+}
 
 pub fn execQuery(conn: *PGConn, query: [:0]u8) ExecError!*QueryResult {
     const query_result: *QueryResult = bindings.PQexec(conn, query) orelse ExecError.IsNull;
@@ -55,7 +69,7 @@ pub fn execQueryWithParams(conn: *PGConn, query: [*:0]const u8, params: anytype)
 
     // i would rather use a usize here (they are sizes after all) but the api
     // uses `int`s
-    var params_typesizes: [n_params]c_int = @splat(0);
+    const params_typesizes: ?[*]c_int = null;
 
     // the gpa will own the memory of the params text-values
     var new_arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
@@ -64,11 +78,21 @@ pub fn execQueryWithParams(conn: *PGConn, query: [*:0]const u8, params: anytype)
     const allocator = new_arena.allocator();
 
     inline for (0..n_params) |idx| {
-        params_text_values[idx] = (std.fmt.allocPrint(allocator, "{}", .{
-            params[idx],
-        }) catch return ExecError.QueryOutOfMemory).ptr;
+        const param = params[idx];
+        const param_type = @TypeOf(param);
+        
+        const fmt = switch (param_type) {
+            []u8, []const u8, [:0]u8, [:0]const u8 => str_fmt: {
+                if (param.len == 0) return ExecError.EmptyStringParam;
 
-        params_typesizes[idx] = @intCast(@sizeOf(params_fields_typeinfo[idx].type));
+                break :str_fmt "{s}";
+            },
+            else => "{}",
+        };
+
+        params_text_values[idx] = (std.fmt.allocPrintZ(allocator, fmt, .{
+            param,
+        }) catch return ExecError.QueryOutOfMemory).ptr;
     }
 
     const query_result: *QueryResult = bindings.PQexecParams(
@@ -77,7 +101,7 @@ pub fn execQueryWithParams(conn: *PGConn, query: [*:0]const u8, params: anytype)
         n_params,
         param_types,
         &params_text_values,
-        &params_typesizes,
+        params_typesizes,
         &param_formats,
         text_format,
     ) orelse return ExecError.IsNull;
