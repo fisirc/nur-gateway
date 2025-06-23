@@ -1,24 +1,7 @@
 const std = @import("std");
+const builtin = @import("builtin");
 
 pub const bindings = @import("pq/binds.zig");
-const PGConn = bindings.PGconn;
-
-pub const ConnError = error.BadConnection;
-
-pub fn connectDbSafe(uri: [:0]const u8) !*PGConn {
-    const new_connection = bindings.PQconnectdb(uri.ptr) orelse return ConnError;
-    const connection_status = bindings.PQstatus(new_connection);
-    if (connection_status != bindings.CONNECTION_OK) {
-        return ConnError;
-    }
-
-    return new_connection;
-}
-
-/// finish the connection and free the related resources
-pub fn finishConn(conn: *PGConn) void {
-    bindings.PQfinish(conn);
-}
 
 pub const ExecError = error {
     IsNull,
@@ -27,100 +10,217 @@ pub const ExecError = error {
     EmptyStringParam,
 };
 
-const QueryResult = bindings.PGresult;
+pub const ConnError = error{
+    BadConnection,
+};
 
-/// returns the number of rows returned into some query result
-pub fn resultRowsLen(result: *QueryResult) usize {
-    const n_tuples: c_int = bindings.PQntuples(result);
-    return @intCast(n_tuples);
-}
+pub const ExecStatus = enum {
+    /// The string sent to the server was empty.
+    empty_query,
 
-/// return the value located at column `col_idx` of the row `row_idx` (starting at 0) from the result (which owns the memory)
-pub fn getValueAt(result: *QueryResult, row_idx: usize, col_idx: usize) []const u8 {
-    const value_textformat = bindings.PQgetvalue(result, @intCast(row_idx), @intCast(col_idx));
-    const value_textlength = std.mem.len(value_textformat);
-    return value_textformat[0..value_textlength];
-}
+    /// Successful completion of a command returning no data.
+    command_ok,
 
-pub fn execQuery(conn: *PGConn, query: [:0]u8) ExecError!*QueryResult {
-    const query_result: *QueryResult = bindings.PQexec(conn, query) orelse ExecError.IsNull;
-    if (bindings.PQresultStatus(query_result) != bindings.PGRES_TUPLES_OK) {
-        return ExecError.QueryError;
+    /// Successful completion of a command returning data (such as a SELECT or SHOW).
+    tuples_ok,
+
+    /// Copy Out (from server) data transfer started.
+    copy_out,
+
+    /// Copy In (to server) data transfer started.
+    copy_in,
+
+    /// The server's response was not understood.
+    bad_response,
+
+    /// A nonfatal error (a notice or warning) occurred.
+    nonfatal_error,
+
+    /// A fatal error occurred.
+    fatal_error,
+
+    /// Copy In/Out (to and from server) data transfer started.
+    copy_both,
+
+    /// The PGresult contains a single result tuple from the current command.
+    single_tuple,
+
+    /// The PGresult contains several result tuples from the current command.
+    tuples_chunk,
+
+    /// The PGresult represents a synchronization point in pipeline mode.
+    pipeline_sync,
+
+    /// The PGresult represents a pipeline that has received an error from the server. 
+    pipeline_aborted,
+};
+
+const QueryResult = struct {
+    const Self = @This();
+
+    /// you are not supposed to use this field directly outside ffi necessities
+    _ffi_result: *bindings.PGresult,
+
+    /// clears the storage of a `result` including result values
+    pub fn clear(self: Self) void {
+        bindings.PQclear(self._ffi_result);
     }
 
-    return query_result;
-}
-
-pub fn execQueryWithParams(conn: *PGConn, query: [*:0]const u8, params: anytype) ExecError!*QueryResult {
-    const params_typeinfo = @typeInfo(@TypeOf(params)).@"struct";
-    const params_fields_typeinfo = params_typeinfo.fields;
-    const n_params = params_fields_typeinfo.len;
-
-    // inferred
-    const param_types: ?[*]bindings.Oid = null;
+    /// returns the result status code to check for errors
+    pub fn status(self: Self) ExecStatus {
+        return switch(bindings.PQresultStatus(self._ffi_result)) {
+            bindings.PGRES_EMPTY_QUERY => ExecStatus.empty_query,
+            bindings.PGRES_COMMAND_OK => ExecStatus.command_ok,
+            bindings.PGRES_TUPLES_OK  => ExecStatus.tuples_ok,
+            bindings.PGRES_COPY_OUT  => ExecStatus.copy_out,
+            bindings.PGRES_COPY_IN  => ExecStatus.copy_in,
+            bindings.PGRES_BAD_RESPONSE  => ExecStatus.bad_response,
+            bindings.PGRES_NONFATAL_ERROR  => ExecStatus.nonfatal_error,
+            bindings.PGRES_FATAL_ERROR  => ExecStatus.fatal_error,
+            bindings.PGRES_COPY_BOTH  => ExecStatus.copy_both,
+            bindings.PGRES_SINGLE_TUPLE  => ExecStatus.single_tuple,
+            bindings.PGRES_TUPLES_CHUNK  => ExecStatus.tuples_chunk,
+            bindings.PGRES_PIPELINE_SYNC  => ExecStatus.pipeline_sync,
+            bindings.PGRES_PIPELINE_ABORTED  => ExecStatus.pipeline_aborted,
+            
+            else => unreachable,
+        };
+    }
     
-    // for the param values, we will use text for all to avoid binary enc/dec
-    // problems
-    var params_text_values: [n_params][*]const u8 = undefined;
+    /// returns the number of rows returned into some query result
+    pub fn rowsLen(self: Self) usize {
+        const n_tuples: c_int = bindings.PQntuples(self._ffi_result);
+        return @intCast(n_tuples);
+    }
 
-    // text = 0, binary = 1
-    const text_format = 0;
-    const param_formats: [n_params]c_int = @splat(text_format);
+    /// return the value located at column `col_idx` of the row `row_idx` (starting at 0) from the result (which owns the memory)
+    pub fn getValueAt(self: Self, row_idx: usize, col_idx: usize) []const u8 {
+        const value_textformat = bindings.PQgetvalue(self._ffi_result, @intCast(row_idx), @intCast(col_idx));
+        const value_textlength = std.mem.len(value_textformat);
+        return value_textformat[0..value_textlength];
+    }
+};
 
-    // i would rather use a usize here (they are sizes after all) but the api
-    // uses `int`s
-    const params_typesizes: ?[*]c_int = null;
+pub const Conn = struct {
+    const Self = @This();
 
-    // the gpa will own the memory of the params text-values
-    var new_arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer new_arena.deinit();
+    /// you are not supposed to use this field directly outside ffi necessities
+    _ffi_conn: *bindings.PGconn,
     
-    const allocator = new_arena.allocator();
-
-    inline for (0..n_params) |idx| {
-        const param = params[idx];
-        const param_type = @TypeOf(param);
-        
-        const fmt = switch (param_type) {
-            []u8, []const u8, [:0]u8, [:0]const u8 => str_fmt: {
-                if (param.len == 0) return ExecError.EmptyStringParam;
-
-                break :str_fmt "{s}";
-            },
-            else => "{}",
+    /// establishes a connection to the db and returns a connection pointer
+    pub fn fromUriZ(uri: [:0]const u8) ConnError!Self {
+        const new_ffi_connection = bindings.PQconnectdb(uri.ptr) orelse return ConnError.BadConnection;
+        const new_connection = Self{
+            ._ffi_conn = new_ffi_connection,
         };
 
-        params_text_values[idx] = (std.fmt.allocPrintZ(allocator, fmt, .{
-            param,
-        }) catch return ExecError.QueryOutOfMemory).ptr;
+        const connection_status = bindings.PQstatus(new_ffi_connection);
+        if (connection_status != bindings.CONNECTION_OK) {
+            if (builtin.mode == .Debug) {
+                std.debug.print("connection error message: {s}", .{
+                    // there should always be an error message at this point
+                    new_connection.getErrorMessage().?,
+                });
+            }
+
+            return ConnError.BadConnection;
+        }
+
+        return new_connection;
     }
 
-    const query_result: *QueryResult = bindings.PQexecParams(
-        conn,
-        query,
-        n_params,
-        param_types,
-        &params_text_values,
-        params_typesizes,
-        &param_formats,
-        text_format,
-    ) orelse return ExecError.IsNull;
-
-    if (bindings.PQresultStatus(query_result) != bindings.PGRES_TUPLES_OK) {
-        return ExecError.QueryError;
+    /// finish the connection and free the related resources
+    pub fn finish(self: Self) void {
+        bindings.PQfinish(self._ffi_conn);
     }
 
-    return query_result;
-}
+    /// Returns the error message most recently generated by an operation on the
+    /// connection, null if none. The connection underlyingly "owns" the memory, it
+    /// gets freed with it at finish
+    pub fn getErrorMessage(self: Self) ?[]const u8 {
+        const error_message = bindings.PQerrorMessage(self._ffi_conn);
+        const error_len = std.mem.len(error_message);
+        return error_message[0..error_len];
+    }
 
-/// Returns the error message most recently generated by an operation on the
-/// connection, null if none. The connection underlyingly "owns" the memory, it
-/// gets freed with it at PQFinish
-pub fn getErrorMessage(conn: *PGConn) ?[]const u8 {
-    const error_message = bindings.PQerrorMessage(conn);
-    const error_len = std.mem.len(error_message);
-    return error_message[0..error_len];
-}
+    pub fn execQueryZ(self: Self, query: [:0]u8) ExecError!*QueryResult {
+        const query_result: *QueryResult = bindings.PQexec(self._ffi_conn, query) orelse ExecError.IsNull;
+        if (bindings.PQresultStatus(query_result) != bindings.PGRES_TUPLES_OK) {
+            return ExecError.QueryError;
+        }
+
+        return query_result;
+    }
+
+    pub fn execQueryZWithParams(self: Self, query: [*:0]const u8, params: anytype) ExecError!QueryResult {
+        const params_typeinfo = @typeInfo(@TypeOf(params)).@"struct";
+        const params_fields_typeinfo = params_typeinfo.fields;
+        const n_params = params_fields_typeinfo.len;
+
+        // inferred
+        const param_types: ?[*]bindings.Oid = null;
+        
+        // we will use the text format for all param values to avoid binary enc/dec
+        // problems
+        var params_text_values: [n_params][*]const u8 = undefined;
+
+        // text = 0, binary = 1
+        const text_format = 0;
+        const param_formats: [n_params]c_int = @splat(text_format);
+
+        // i would rather use a usize here (they are sizes after all) but the api
+        // uses `int`s
+        const params_typesizes: ?[*]c_int = null;
+
+        // the arena will own the memory of the params text-values
+        var new_arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+        defer new_arena.deinit();
+        
+        const allocator = new_arena.allocator();
+
+        inline for (0..n_params) |idx| {
+            const param = params[idx];
+            const param_type = @TypeOf(param);
+            
+            const fmt = switch (param_type) {
+                []u8, []const u8, [:0]u8, [:0]const u8 => str_fmt: {
+                    if (param.len == 0) return ExecError.EmptyStringParam;
+
+                    break :str_fmt "{s}";
+                },
+                else => "{}",
+            };
+
+            params_text_values[idx] = (std.fmt.allocPrintZ(allocator, fmt, .{
+                param,
+                }) catch return ExecError.QueryOutOfMemory).ptr;
+        }
+
+        const query_result_ffi = bindings.PQexecParams(
+            self._ffi_conn,
+            query,
+            n_params,
+            param_types,
+            &params_text_values,
+            params_typesizes,
+            &param_formats,
+            text_format,
+        ) orelse return ExecError.IsNull;
+
+        const query_result = QueryResult{
+            ._ffi_result = query_result_ffi,
+        };
+
+        if (query_result.status() != ExecStatus.tuples_ok) {
+            return ExecError.QueryError;
+        }
+
+        return query_result;
+    }
+};
+
+
+
 
 
 

@@ -86,8 +86,11 @@ pub fn TcpServer(handler_type: type) type {
 
             defer new_pool.deinit();
 
-            const host_ip = try std.net.Address.resolveIp(options.hostname, options.port);
-            var server = try std.net.Address.listen(host_ip, .{
+            const addr_list = try std.net.getAddressList(self.alloc, options.hostname, options.port);
+            if (addr_list.addrs.len == 0) return error.UnknownHostName;
+
+            const address = addr_list.addrs[0];
+            var server = try std.net.Address.listen(address, .{
                 // this is so the port does not "block" after a forceful kill
                 // signal
                 .reuse_address = true,
