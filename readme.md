@@ -19,7 +19,7 @@ zig build -Doptimize=ReleaseSafe
 Debug builds are built like this:
 
 ```sh
-zig build -Doptimize=ReleaseSafe
+zig build
 ```
 
 ### CONFIGURATION
