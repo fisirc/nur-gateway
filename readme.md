@@ -8,7 +8,9 @@ linux-only! :3c
 
 ### BUILDING
 
-Release builds (without debuginfo and nonverbose) are built like this:
+You will need a working zig compiler to compile this project (at least
+v0.14.0). Then release builds (without debuginfo and nonverbose) are
+built like this:
 
 ```sh
 zig build -Doptimize=ReleaseSafe
