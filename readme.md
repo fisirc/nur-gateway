@@ -35,7 +35,7 @@ SV_HOSTNAME="<desired-hostname>"
 ### INNERS
 
 This service exposes an HTTP server through the port specified at
-[CONFIGURATION](### CONFIGURATION), then intercepts every request's
+[CONFIGURATION](#configuration), then intercepts every request's
 headers to capture the target. Once it has found the function
 information related to that target it forwards the whole request to a
 worker service.
