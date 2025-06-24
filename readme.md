@@ -1,33 +1,47 @@
 ## Thwomp
 
-<img src="./docs/media/thwomp.webp" alt="super mario thwomp" align="right" width="200" />
+<img src="./docs/media/thwomp.webp" alt="super mario thwomp"
+align="right" width="200" />
 
-STOMP-compatible message queue server implementation made in Zig, **planning to
-pass a 100% of STOMP tests but not there yet so blehh :3c**!!!!
+API gateway service of the Nur project, low-dependencies and
+linux-only! :3c
 
+### BUILD IT
 
-### Building and deploying
-
-Not there yet either but building should be as simple as:
+Release builds (without debuginfo and nonverbose) are built like this:
 
 ```sh
 zig build -Doptimize=ReleaseSafe
 ```
 
-And the result should be a single statically linked binary to prevent
-portability issues
+Debug builds are built like this:
 
+```sh
+zig build -Doptimize=ReleaseSafe
+```
 
-### Configuration
+### CONFIGURATION
 
-Will probably maintain sime kind of configuration file format using a structured
-human readable language like toml but not there yet either lmao!!!!
+Some runtime parameters can be set through an `.env` file:
 
-### To-Do
+```
+PG_URL="<postgres-uri>"
+SV_PORT="<desired-port>"
+SV_HOSTNAME="<desired-hostname>"
+```
 
-- [ ] implement the actual tcp protocol
-- [ ] add the "escaped" chars parser
-- [ ] migrate the tcp server to tardy or some other async runtime
+### INNERS
 
+This service exposes an HTTP server through the port specified at
+[CONFIGURATION](### CONFIGURATION), then intercepts every request's
+headers to capture the target. Once it has found the function
+information related to that target it forwards the whole request to a
+worker service.
+
+The target should be formatted as follows:
+
+```
+/<project-id>/some/path
+```
 
 
