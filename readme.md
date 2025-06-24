@@ -6,7 +6,7 @@ align="right" width="200" />
 API gateway service of the Nur project, low-dependencies and
 linux-only! :3c
 
-### BUILD IT
+### BUILDING
 
 Release builds (without debuginfo and nonverbose) are built like this:
 
