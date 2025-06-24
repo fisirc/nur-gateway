@@ -8,7 +8,7 @@ pub const HandshakePayloadV1 = extern struct {
 };
 
 comptime {
-    if (@sizeOf(HandshakePayloadV1) != @sizeOf(u8) + @sizeOf([4]u32) + @sizeOf(u64)) @compileLog(@sizeOf(HandshakePayloadV1));
+    if (@sizeOf(HandshakePayloadV1) != @sizeOf(u8) + @sizeOf(uuid.UUID) + @sizeOf(u64)) @compileLog(@sizeOf(HandshakePayloadV1));
 }
 
 pub const HandshakePayloadV2 = extern struct {
@@ -42,12 +42,12 @@ pub const WorkerConn = struct {
         malformed,
         not_found,
     };
-    
-    conn: std.net.Stream,
+
+    stream: std.net.Stream,
 
     fn handshakeV1(self: WorkerConn, payload: HandshakePayloadV1) !void {
-        const conn_writer = self.conn.writer().any();
-        const conn_reader = self.conn.reader().any();
+        const conn_writer = self.stream.writer().any();
+        const conn_reader = self.stream.reader().any();
 
         try conn_writer.writeStructEndian(payload, .big);
 
@@ -75,7 +75,7 @@ pub const WorkerConn = struct {
 
 pub const WorkerDiscovery = struct {
     const Self = @This();
-    
+
     pub const WorkerInfo = std.net.Address;
 
     worker_infolist: std.ArrayList(?WorkerInfo),
@@ -108,7 +108,7 @@ pub const WorkerDiscovery = struct {
         NoAvailableWorkers,
         CouldntConnect,
     };
-    
+
     fn findAvail(self: Self) !std.net.Stream {
         const workers = self.worker_infolist.items;
         for (workers) |*worker| {
@@ -131,16 +131,10 @@ pub const WorkerDiscovery = struct {
 
         return AvailError.NoAvailableWorkers;
     }
-    
+
     pub fn findConn(self: Self) !WorkerConn {
-        return .{
-            .conn = try self.findAvail(),
+        return WorkerConn{
+            .stream = try self.findAvail(),
         };
     }
 };
-
-pub fn initProxy(proxied: std.net.Server.Connection) void {
-    _ = proxied; // autofix
-}
-
-

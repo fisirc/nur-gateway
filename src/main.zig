@@ -1,7 +1,8 @@
 const std = @import("std");
 const server = @import("lib/server.zig");
+const proxy = @import("lib/proxy_scheduler.zig");
 
-const StompServer = @import("server.zig").StompServer;
+const StompServer = @import("thwomp_server.zig").MainServer;
 
 pub fn main() !void {
     var gpa: std.heap.GeneralPurposeAllocator(.{
@@ -20,7 +21,7 @@ pub fn main() !void {
 
     const env_hostname = server_ctx.envd.get("SV_HOSTNAME") orelse "localhost";
     const env_port = server_ctx.envd.get("SV_PORT") orelse "3000";
-    
+
     var stomp_server = server.TcpServer(StompServer).init(server_allocator, .{
         .hostname = env_hostname,
         .port = try std.fmt.parseUnsigned(u16, env_port, 10),
@@ -28,7 +29,3 @@ pub fn main() !void {
 
     try stomp_server.listen(&server_ctx);
 }
-
-
-
-
