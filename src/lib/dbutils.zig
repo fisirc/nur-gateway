@@ -10,12 +10,6 @@ pub fn getFunctionDeplDate(pg_path: [:0]const u8,
     const conn = pq.Conn.fromUriZ(pg_path) catch return error.DbCouldntConnect;
     defer conn.finish();
 
-    std.debug.print("some data ({s} {s} {s})\n", .{
-        route,
-        method_name,
-        project_id,
-    });
-
     const result = conn.execQueryZWithParams(
         \\ select m.function_id as "function_id", round(extract(epoch from fd.created_at)) as "last_deploy_creation_date"
             \\ from methods m
