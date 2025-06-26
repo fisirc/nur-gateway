@@ -85,7 +85,7 @@ pub const MainServer = struct {
         var ready_server = std.http.Server.init(connection, header_buffer[0..]);
         const request_with_header = ready_server.receiveHead() catch |err| {
             std.log.err("couldn't receive http header from connection: {}", .{ err });
-            return;
+            unreachable;
         };
 
         // every (method, target) pair should correspond to a single function id
@@ -101,7 +101,17 @@ pub const MainServer = struct {
         const truncated_target = target[1 + project_id.len..];
 
         // now these are the actual pieces of data we need:_struct { function_id, depl_date }
-        const function_depl_date = dbutils.getFunctionDeplDate(pg_path, project_id, truncated_target, method) catch unreachable;
+        const function_depl_date = dbutils.getFunctionDeplDate(pg_path, project_id, truncated_target, method) catch |err| {
+            std.log.err("couldn't get any rows: {}", .{ err });
+            return;
+        } orelse {
+            std.log.err("no rows matched pg_path({s}) project_id({s}) truncated_target({s})", .{
+                pg_path,
+                project_id,
+                truncated_target,
+            });
+            return;
+        };
 
         const the_woker = worker_discovery.WorkerDiscovery.init(handler_allocator) catch |err| {
             std.log.err("couldnt alloc new worker discovery unit: {}", .{ err });

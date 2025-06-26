@@ -19,12 +19,12 @@
         pname = "thwomp";
         version = "0.1.0";
         src = ./.;
-        
+
         buildPhase = ''
             export ZIG_GLOBAL_CACHE_DIR=$TMPDIR/zig-cache
             zig build
           '';
-        
+
         installPhase = ''
             mkdir -p $out/bin
             cp zig-out/bin/* $out/bin/

@@ -6,9 +6,15 @@ const uuid = @import("uuid.zig");
 pub fn getFunctionDeplDate(pg_path: [:0]const u8,
                            project_id: []const u8,
                            route: []const u8,
-                           method_name: []const u8) !struct { uuid.UUID, u64 } {
+                           method_name: []const u8) !?struct { uuid.UUID, u64 } {
     const conn = pq.Conn.fromUriZ(pg_path) catch return error.DbCouldntConnect;
     defer conn.finish();
+
+    std.debug.print("some data ({s} {s} {s})\n", .{
+        route,
+        method_name,
+        project_id,
+    });
 
     const result = conn.execQueryZWithParams(
         \\ select m.function_id as "function_id", round(extract(epoch from fd.created_at)) as "last_deploy_creation_date"
@@ -29,10 +35,10 @@ pub fn getFunctionDeplDate(pg_path: [:0]const u8,
 
     const result_rows = result.rowsLen();
     if (result_rows == 0) {
-        return error.DbEmptyQuery;
+        return null;
     }
 
-    const function_id = result.getValueAt(0, 0);    
+    const function_id = result.getValueAt(0, 0);
     const deploy_date_time = result.getValueAt(0, 1);
 
     return .{
@@ -40,5 +46,3 @@ pub fn getFunctionDeplDate(pg_path: [:0]const u8,
         try std.fmt.parseUnsigned(u64, deploy_date_time, 10),
     };
 }
-
-

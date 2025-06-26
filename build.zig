@@ -9,7 +9,7 @@ pub fn build(b: *std.Build) void {
 
     const dotenv_dep = b.dependency("dotenv", .{});
     const dotenv_mod = dotenv_dep.module("dotenv");
-    
+
     const libthwomp_mod = b.createModule(.{
         .root_source_file = b.path("src/lib/stomp/lib.zig"),
         .target = target,
