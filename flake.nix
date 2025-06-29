@@ -9,57 +9,35 @@
     let
       system = "x86_64-linux";
       pkgs = import nixpkgs { inherit system; };
+      deps = pkgs.callPackage ./build.zig.zon.nix {};
     in {
-      packages.x86_64-linux.default =
-        let
-          deps = pkgs.stdenv.mkDerivation {
-            pname = "thwomp-deps";
-            version = "0.0.0";
-            src = ./.;
+      packages.x86_64-linux.default = pkgs.stdenv.mkDerivation {
+        pname = "thwomp";
+        version = "1.0.0";
+        src = ./.;
 
-            nativeBuildInputs = [
-              pkgs.zig
-              pkgs.binutils
-            ];
+        nativeBuildInputs = [
+          pkgs.zig
+          pkgs.binutils
+        ];
 
-            buildPhase = ''
-            mkdir $TMPDIR/zig-cache
-            export ZIG_GLOBAL_CACHE_DIR=$TMPDIR/zig-cache
-            zig build --fetch
-          '';
+        buildPhase = ''
+            mkdir -p $TMPDIR/cache
+            cp -r ${deps}/* $TMPDIR/cache
 
-            installPhase = ''
-            mkdir -p $out/cache
-            cp -r $TMPDIR/zig-cache $out/cache
-          '';
+            export ZIG_GLOBAL_CACHE_DIR=$TMPDIR/cache
+            chmod --recursive +w $ZIG_GLOBAL_CACHE_DIR
 
-            dontPatchShebangs = true;
+            ls -la $TMPDIR/cache
 
-            outputHashAlgo = "sha256";
-            outputHashMode = "recursive";
-            outputHash = "sha256-G8zEUjtypOyS3DdpXXHJDW2r469CDGcHgcf0aDFPMwg=";
-          };
-        in
-          pkgs.stdenv.mkDerivation {
-            pname = "thwomp";
-            version = "1.0.0";
-            src = ./.;
+            zig build -Doptimize=ReleaseSafe --system $ZIG_GLOBAL_CACHE_DIR
+            '';
 
-            nativeBuildInputs = [
-              pkgs.zig
-              pkgs.binutils
-            ];
-
-            buildPhase = ''
-           export ZIG_GLOBAL_CACHE_DIR=${deps}/cache
-           zig build -Doptimize=ReleaseSafe
-           '';
-
-            installPhase = ''
+        installPhase = ''
             mkdir -p $out/bin
             cp zig-out/bin/* $out/bin/
             '';
-          };
+      };
 
       devShells.x86_64-linux.default = pkgs.mkShell {
         buildInputs = [
