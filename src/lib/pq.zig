@@ -62,7 +62,7 @@ pub const ExecStatus = enum {
     /// the pgresult represents a synchronization point in pipeline mode.
     pipeline_sync,
 
-    /// the pgresult represents a pipeline that has received an error from the server. 
+    /// the pgresult represents a pipeline that has received an error from the server.
     pipeline_aborted,
 };
 
@@ -93,11 +93,11 @@ const QueryResult = struct {
             bindings.PGRES_TUPLES_CHUNK  => ExecStatus.tuples_chunk,
             bindings.PGRES_PIPELINE_SYNC  => ExecStatus.pipeline_sync,
             bindings.PGRES_PIPELINE_ABORTED  => ExecStatus.pipeline_aborted,
-            
+
             else => unreachable,
         };
     }
-    
+
     /// returns the number of rows returned into some query result
     pub fn rowsLen(self: Self) usize {
         const n_tuples: c_int = bindings.PQntuples(self._ffi_result);
@@ -117,7 +117,7 @@ pub const Conn = struct {
 
     /// you are not supposed to use this field directly outside ffi necessities
     _ffi_conn: *bindings.PGconn,
-    
+
     /// establishes a connection to the db and returns a connection pointer
     pub fn fromUriZ(uri: [:0]const u8) ConnError!Self {
         const new_connection = Self{
@@ -177,7 +177,7 @@ pub const Conn = struct {
 
         // inferred
         const param_types: ?[*]bindings.Oid = null;
-        
+
         // we will use the text format for all param values to avoid binary enc/dec
         // problems
         var params_text_values: [n_params][*]const u8 = undefined;
@@ -193,13 +193,13 @@ pub const Conn = struct {
         // the arena will own the memory of the params text-values
         var new_arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
         defer new_arena.deinit();
-        
+
         const allocator = new_arena.allocator();
 
         inline for (0..n_params) |idx| {
             const param = params[idx];
             const param_type = @TypeOf(param);
-            
+
             const fmt = switch (param_type) {
                 []u8, []const u8, [:0]u8, [:0]const u8 => str_fmt: {
                     if (param.len == 0) return ExecError.EmptyStringParam;
@@ -236,9 +236,3 @@ pub const Conn = struct {
         return query_result;
     }
 };
-
-
-
-
-
-
