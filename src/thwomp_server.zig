@@ -15,12 +15,14 @@ pub const MainServer = struct {
         qmap: QueueMap,
         envd: EnvMap,
         proxy_router: proxy.SyncRouter,
+        worker_discovery_service: worker_discovery.WorkerDiscovery,
 
         pub fn init(alloc: std.mem.Allocator) !@This() {
             return @This(){
                 .qmap = try QueueMap.init(alloc),
                 .envd = try dotenv.loadEnv(512, ".env", alloc),
                 .proxy_router = proxy.SyncRouter.init(alloc),
+                .worker_discovery_service = try worker_discovery.WorkerDiscovery.init(alloc),
             };
         }
 
@@ -28,6 +30,7 @@ pub const MainServer = struct {
             self.qmap.deinit();
             self.envd.deinit();
             self.proxy_router.deinit();
+            self.worker_discovery_service.deinit();
         }
     };
 
@@ -88,44 +91,43 @@ pub const MainServer = struct {
             unreachable;
         };
 
+        const raw_http_target = request_with_header.head.target;
+
         // every (method, target) pair should correspond to a single function id
         // which will then be passed down to the worker
         const method = @tagName(request_with_header.head.method);
-        const target = request_with_header.head.target;
-        const project_id = projectIdFromTarget(target) catch {
-            std.log.err("couldn't get project id from the target, is the target fine? target: {s}", .{ target });
+
+        const project_id = projectIdFromTarget(raw_http_target) catch {
+            std.log.err("couldn't get project id from the target, is the target fine? target: {s}", .{ raw_http_target });
             return;
         };
 
-        // we will ignore the project id from the path (this is hwo they are stored in the db)
-        const truncated_target = target[1 + project_id.len..];
+        // we will ignore the project id from the path (this is how they are stored in the db)
+        const target = raw_http_target[1 + project_id.len..];
 
         // now these are the actual pieces of data we need:_struct { function_id, depl_date }
-        const function_depl_date = dbutils.getFunctionDeplDate(pg_path, project_id, truncated_target, method) catch |err| {
+        const function_depl_date = dbutils.getFunctionDeplDate(pg_path, project_id, target, method) catch |err| {
             std.log.err("couldn't get any rows: {}", .{ err });
             return;
         } orelse {
             std.log.err("no rows matched pg_path({s}) project_id({s}) truncated_target({s})", .{
                 pg_path,
                 project_id,
-                truncated_target,
+                target,
             });
             return;
         };
 
-        const the_woker = worker_discovery.WorkerDiscovery.init(handler_allocator) catch |err| {
-            std.log.err("couldnt alloc new worker discovery unit: {}", .{ err });
-            return;
-        }; defer the_woker.deinit();
+        const worker_discovery_service = srv_ctx.worker_discovery_service;
 
-        const woke_connection = the_woker.findConn() catch |err| {
+        const woke_connection = worker_discovery_service.findConn() catch |err| {
             std.log.err("couldnt establish a worker connection: {}", .{ err });
             return;
         };
 
-        defer woke_connection.stream.close();
+        defer woke_connection.close();
 
-        const woke_payload = worker_discovery.genPayload(.v1, .{
+        const woke_payload = worker_discovery.initPayload(.v1, .{
             .function_id = function_depl_date[0],
             .deployment_date = function_depl_date[1],
         });

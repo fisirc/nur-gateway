@@ -1,35 +1,39 @@
 const std = @import("std");
 const uuid = @import("uuid.zig");
 
-pub const HandshakePayloadV1 = extern struct {
-    version: u8 align(1) = 1,
+pub const PayloadV1 = extern struct {
+    version: u8 = 1,
     function_id: uuid.UUID align(1),
     deployment_date: u64 align(1),
 };
 
 comptime {
-    if (@sizeOf(HandshakePayloadV1) != @sizeOf(u8) + @sizeOf(uuid.UUID) + @sizeOf(u64)) @compileLog(@sizeOf(HandshakePayloadV1));
+    if (@sizeOf(PayloadV1) != @sizeOf(u8) + @sizeOf(uuid.UUID) + @sizeOf(u64)) @compileError("payload v1 has padding");
 }
 
-pub const HandshakePayloadV2 = extern struct {
+pub const PayloadV2 = extern struct {
     version: u8 = 2,
-    function_uuid: [4]u32 align(1),
+    function_uuid: uuid.UUID align(1),
     deployment_date: u64 align(1),
 
     data_length: u16 align(1),
 };
+
+comptime {
+    if (@sizeOf(PayloadV2) != @sizeOf(u8) + @sizeOf(uuid.UUID) + @sizeOf(u64) + @sizeOf(u16)) @compileError("payload v2 has padding");
+}
 
 pub const HandshakeVersion = enum {
     v1,
     v2,
 };
 
-pub const HandshakePayload = union(HandshakeVersion) {
-    v1: HandshakePayloadV1,
-    v2: HandshakePayloadV2,
+pub const Payload = union(HandshakeVersion) {
+    v1: PayloadV1,
+    v2: PayloadV2,
 };
 
-pub inline fn genPayload(comptime version: HandshakeVersion, data: if (version == .v1) HandshakePayloadV1 else HandshakePayloadV2) HandshakePayload {
+pub inline fn initPayload(comptime version: HandshakeVersion, data: if (version == .v1) PayloadV1 else PayloadV2) Payload {
     switch (version) {
         .v1 => return .{ .v1 = data },
         .v2 => return .{ .v2 = data },
@@ -37,21 +41,27 @@ pub inline fn genPayload(comptime version: HandshakeVersion, data: if (version =
 }
 
 pub const WorkerConn = struct {
-    const HandshakeAnswer = enum(u8) {
-        ok,
-        malformed,
-        not_found,
+    const Self = @This();
+
+    const WorkerAnswer = enum(u8) {
+        ok = 0,
+        malformed = 1,
+        not_found = 2,
     };
 
     stream: std.net.Stream,
 
-    fn handshakeV1(self: WorkerConn, payload: HandshakePayloadV1) !void {
+    pub inline fn close(self: Self) void {
+        self.stream.close();
+    }
+
+    fn handshakeV1(self: Self, payload: PayloadV1) !void {
         const conn_writer = self.stream.writer().any();
         const conn_reader = self.stream.reader().any();
 
         try conn_writer.writeStructEndian(payload, .big);
 
-        const answer: HandshakeAnswer = try conn_reader.readEnum(HandshakeAnswer, .big);
+        const answer = try conn_reader.readEnum(WorkerAnswer, .big);
         switch (answer) {
             .ok => return,
             .malformed => return error.Malformed,
@@ -59,13 +69,13 @@ pub const WorkerConn = struct {
         }
     }
 
-    fn handshakeV2(self: WorkerConn, payload: HandshakePayloadV2) !void {
+    fn handshakeV2(self: Self, payload: PayloadV2) !void {
         _ = self;
         _ = payload;
         unreachable;
     }
 
-    pub fn handshake(self: WorkerConn, payload: HandshakePayload) !void {
+    pub fn handshake(self: Self, payload: Payload) !void {
         switch (payload) {
             .v1 => |payload_v1| return self.handshakeV1(payload_v1),
             .v2 => |payload_v2| return self.handshakeV2(payload_v2),
@@ -76,14 +86,12 @@ pub const WorkerConn = struct {
 pub const WorkerDiscovery = struct {
     const Self = @This();
 
-    pub const WorkerInfo = std.net.Address;
-
-    worker_infolist: std.ArrayList(?WorkerInfo),
+    worker_infolist: std.ArrayList(std.net.Address),
     alloc: std.mem.Allocator,
 
     pub fn init(alloc: std.mem.Allocator) !Self {
         var ret = Self{
-            .worker_infolist = std.ArrayList(?WorkerInfo).init(alloc),
+            .worker_infolist = std.ArrayList(std.net.Address).init(alloc),
             .alloc = alloc,
         };
 
@@ -106,35 +114,31 @@ pub const WorkerDiscovery = struct {
 
     const AvailError = error {
         NoAvailableWorkers,
-        CouldntConnect,
+        NoWorkers,
+        ConnectionError,
     };
 
-    fn findAvail(self: Self) !std.net.Stream {
+    /// searches for a worker to establish a healthy connection with
+    /// (will return an error if any worker connection results in an
+    /// unexpected error)
+    pub fn findConn(self: Self) !WorkerConn {
         const workers = self.worker_infolist.items;
+        if (workers.len == 0) return AvailError.NoWorkers;
+
         for (workers) |*worker| {
-            if (worker.*) |worker_addr| {
-                const address = worker_addr;
-                const connection_stream = std.net.tcpConnectToAddress(address) catch |err| switch (err) {
-                    error.AddressNotAvailable,
-                    error.ConnectionRefused,
-                    error.ConnectionTimedOut => {
-                        worker.* = null;
-                        continue;
-                    },
+            const connection_stream = std.net.tcpConnectToAddress(worker.*) catch |err| switch (err) {
+                error.AddressNotAvailable,
+                error.ConnectionRefused,
+                error.ConnectionTimedOut => {
+                    continue;
+                },
 
-                    else => return AvailError.CouldntConnect,
-                };
+                else => return AvailError.ConnectionError,
+            };
 
-                return connection_stream;
-            } else continue;
+            return .{ .stream = connection_stream };
         }
 
         return AvailError.NoAvailableWorkers;
-    }
-
-    pub fn findConn(self: Self) !WorkerConn {
-        return WorkerConn{
-            .stream = try self.findAvail(),
-        };
     }
 };
