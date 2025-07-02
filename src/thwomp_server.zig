@@ -6,6 +6,7 @@ const worker_discovery = @import("lib/worker_discovery.zig");
 const dbutils = @import("lib/dbutils.zig");
 const uuid = @import("lib/uuid.zig");
 const proxy = @import("lib/proxy_scheduler.zig");
+const fd_logger = @import("lib/fd_logger.zig");
 
 const QueueMap = @import("queues.zig").SyncQueueMap;
 const EnvMap = std.process.EnvMap;
@@ -49,8 +50,13 @@ pub const MainServer = struct {
     pub fn handle(connection: std.net.Server.Connection, srv_ctx: *Ctx) void {
         defer libthwomp.ioutils.closeConnection(connection);
 
+        const connection_fd = connection.stream.handle;
+
         libthwomp.ioutils.configHandleNoblock(connection) catch |err| {
-            std.log.err("couldn't configure socket into non blocking: {}", .{ err });
+            fd_logger.err(connection_fd, "couldn't configure socket into non blocking: {}", .{
+                err,
+            });
+
             return;
         };
 
@@ -59,7 +65,7 @@ pub const MainServer = struct {
         }) = .init;
 
         defer switch (gpa.deinit()) {
-            .leak => std.log.err("leaked memory fuckkkkk!!!!", .{}),
+            .leak => fd_logger.err(connection_fd, "memory leak detected", .{}),
             .ok => {},
         };
 
@@ -68,17 +74,16 @@ pub const MainServer = struct {
         // supabase postgresql connection url
         const pg_path = pg_path_blk: {
             const nozero = srv_ctx.envd.get("PG_URL") orelse {
-                std.log.err("postgres connection url is null", .{});
+                fd_logger.err(connection_fd, "postgres connection url is null", .{});
                 return;
             };
 
             const zeroed_mem = handler_allocator.allocSentinel(u8, nozero.len, 0) catch |err| {
-                std.log.err("couldnt alloc zeroed path: {}", .{ err });
+                fd_logger.err(connection_fd, "couldnt alloc zeroed path: {}", .{ err });
                 return;
             };
 
             @memcpy(zeroed_mem[0..nozero.len], nozero);
-
             break :pg_path_blk zeroed_mem;
         };
 
@@ -87,7 +92,7 @@ pub const MainServer = struct {
         var header_buffer: [4096]u8 = @splat(0);
         var ready_server = std.http.Server.init(connection, header_buffer[0..]);
         const request_with_header = ready_server.receiveHead() catch |err| {
-            std.log.err("couldn't receive http header from connection: {}", .{ err });
+            fd_logger.err(connection_fd, "couldn't receive http header from connection: {}", .{ err });
             unreachable;
         };
 
@@ -98,19 +103,20 @@ pub const MainServer = struct {
         const method = @tagName(request_with_header.head.method);
 
         const project_id = projectIdFromTarget(raw_http_target) catch {
-            std.log.err("couldn't get project id from the target, is the target fine? target: {s}", .{ raw_http_target });
+            fd_logger.err(connection_fd, "couldn't get project id from the target, is the target fine? target: {s}", .{ raw_http_target });
             return;
         };
 
         // we will ignore the project id from the path (this is how they are stored in the db)
         const target = raw_http_target[1 + project_id.len..];
 
-        // now these are the actual pieces of data we need:_struct { function_id, depl_date }
+        // now these are the actual pieces of data we need: struct { function_id, depl_date }
         const function_depl_date = dbutils.getFunctionDeplDate(pg_path, project_id, target, method) catch |err| {
-            std.log.err("couldn't get any rows: {}", .{ err });
+            fd_logger.err(connection_fd, "couldn't get any rows: {}", .{ err });
             return;
         } orelse {
-            std.log.err("no rows matched pg_path({s}) project_id({s}) truncated_target({s})", .{
+            fd_logger.err(connection_fd,
+                          "no rows matched pg_path({s}) project_id({s}) truncated_target({s})", .{
                 pg_path,
                 project_id,
                 target,
@@ -121,7 +127,7 @@ pub const MainServer = struct {
         const worker_discovery_service = srv_ctx.worker_discovery_service;
 
         const woke_connection = worker_discovery_service.findConn() catch |err| {
-            std.log.err("couldnt establish a worker connection: {}", .{ err });
+            fd_logger.err(connection_fd, "couldnt establish a worker connection: {}", .{ err });
             return;
         };
 
@@ -133,22 +139,26 @@ pub const MainServer = struct {
         });
 
         woke_connection.handshake(woke_payload) catch |err| {
-            std.log.err("couldnt perform handshake over the worker connection: {}", .{ err });
+            fd_logger.err(connection_fd,
+                          "couldnt perform handshake over the worker connection: {}", .{ err });
             return;
         };
 
-        std.log.info("handshake succesful!", .{});
+        fd_logger.info(connection_fd,
+                       "handshake succesful!", .{});
 
         woke_connection.stream.writeAll(ready_server.read_buffer[0..ready_server.read_buffer_len]) catch |err| {
-            std.log.err("couldnt write http to worker: {}", .{ err });
+            fd_logger.err(connection_fd, "couldnt write http to worker: {}", .{ err });
             return;
         };
 
-        std.log.info("sent http header to worker", .{});
+        fd_logger.info(connection_fd,
+                       "sent http header to worker", .{});
 
         const epoll_instance_fd = std.posix.epoll_create1(0) catch unreachable;
 
-        std.log.info("created new epoll instance", .{});
+        fd_logger.info(connection_fd,
+                       "created new epoll instance", .{});
 
         var web_conn_event = std.os.linux.epoll_event{
             .data = .{ .fd = connection.stream.handle },
@@ -156,11 +166,12 @@ pub const MainServer = struct {
         };
 
         std.posix.epoll_ctl(epoll_instance_fd, std.os.linux.EPOLL.CTL_ADD, connection.stream.handle, &web_conn_event) catch |err| {
-            std.log.err("couldnt invoke epoll ctl: {}", .{ err });
+            fd_logger.err(connection_fd, "couldnt invoke epoll ctl: {}", .{ err });
             return;
         };
 
-        std.log.info("added http conn to epoll", .{});
+        fd_logger.info(connection_fd,
+                       "added http conn to epoll", .{});
 
         var worker_conn_event = std.os.linux.epoll_event{
             .data = .{ .fd = woke_connection.stream.handle },
@@ -168,16 +179,18 @@ pub const MainServer = struct {
         };
 
         std.posix.epoll_ctl(epoll_instance_fd, std.os.linux.EPOLL.CTL_ADD, woke_connection.stream.handle, &worker_conn_event) catch |err| {
-            std.log.err("couldnt invoke epoll ctl: {}", .{ err });
+            fd_logger.err(connection_fd, "couldnt invoke epoll ctl: {}", .{ err });
             return;
         };
 
-        std.log.info("added worker conn to epoll", .{});
+        fd_logger.info(connection_fd,
+                       "added worker conn to epoll", .{});
 
         var epoll_returned_events_buffer: [8]std.os.linux.epoll_event = undefined;
 
         spin_on_data: while (true) {
-            std.log.info("waiting for data...", .{});
+            fd_logger.info(connection_fd,
+                           "waiting for data...", .{});
 
             const epoll_returned_events = events_blk: {
                 const events_size = std.posix.epoll_wait(epoll_instance_fd, epoll_returned_events_buffer[0..], 1000);
@@ -185,7 +198,8 @@ pub const MainServer = struct {
             };
 
             if (epoll_returned_events.len == 0) {
-                std.log.info("conn is ready but no data was received, goodbye!", .{});
+                fd_logger.info(connection_fd,
+                               "conn is ready but no data was received, goodbye!", .{});
                 break :spin_on_data;
             }
 
@@ -198,7 +212,7 @@ pub const MainServer = struct {
 
                 if (fd == connection.stream.handle) {
                     proxy.pipeData(connection.stream, woke_connection.stream) catch |err| {
-                        std.log.err("pipe io error: {}", .{
+                        fd_logger.err(connection_fd, "pipe io error: {}", .{
                             err,
                         });
 
@@ -206,7 +220,7 @@ pub const MainServer = struct {
                     };
                 } else if (fd == woke_connection.stream.handle) {
                     proxy.pipeData(woke_connection.stream, connection.stream) catch |err| {
-                        std.log.err("pipe io error: {}", .{
+                        fd_logger.err(connection_fd, "pipe io error: {}", .{
                             err,
                         });
 

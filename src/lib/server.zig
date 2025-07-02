@@ -61,7 +61,7 @@ pub fn TcpServer(handler_type: type) type {
                     continue;
                 };
 
-                std.log.info("connection pulled addr({}):fd({}), deploying handler", .{
+                std.log.info("connection pulled address({}) fd({}), deploying handler", .{
                     conn.address,
                     conn.stream.handle,
                 });
