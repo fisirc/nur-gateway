@@ -5,9 +5,9 @@ RUN echo "experimental-features = nix-command flakes" >> /etc/nix/nix.conf
 RUN echo "sandbox = true" >> /etc/nix/nix.conf
 
 WORKDIR /app
-
 COPY . .
+RUN nix build
 
-CMD [ "nix", "run" ]
+CMD [ "./result/bin/thwomp" ]
 
 

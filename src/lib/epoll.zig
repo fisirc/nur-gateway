@@ -1,10 +1,14 @@
 const std = @import("std");
 
-alloc: std.mem.Allocator,
-stream_router: std.AutoHashMap(*std.net.Stream, *std.net.Stream),
-locks_router: std.AutoHashMap(*std.net.Stream, *std.Thread.Mutex),
 
-enroute_lock: std.Thread.RwLock,
+const Epoll = @This();
 
+handle: std.posix.fd_t,
+
+pub fn init() Epoll {
+    return .{
+        .handle = std.posix.epoll_create1
+    };
+}
 
 

@@ -5,8 +5,8 @@ const dotenv = @import("dotenv");
 const worker_discovery = @import("lib/worker_discovery.zig");
 const dbutils = @import("lib/dbutils.zig");
 const uuid = @import("lib/uuid.zig");
-const proxy = @import("lib/proxy_scheduler.zig");
 const fd_logger = @import("lib/fd_logger.zig");
+const forward_router = @import("lib/forward_route.zig");
 
 const QueueMap = @import("queues.zig").SyncQueueMap;
 const EnvMap = std.process.EnvMap;
@@ -15,23 +15,23 @@ pub const MainServer = struct {
     pub const Ctx = struct {
         qmap: QueueMap,
         envd: EnvMap,
-        proxy_router: proxy.SyncRouter,
         worker_discovery_service: worker_discovery.WorkerDiscovery,
+        router: forward_router.Router,
 
         pub fn init(alloc: std.mem.Allocator) !@This() {
             return @This(){
                 .qmap = try QueueMap.init(alloc),
                 .envd = try dotenv.loadEnv(512, ".env", alloc),
-                .proxy_router = proxy.SyncRouter.init(alloc),
                 .worker_discovery_service = try worker_discovery.WorkerDiscovery.init(alloc),
+                .router = try forward_router.Router.init(alloc),
             };
         }
 
         pub fn deinit(self: *@This()) void {
             self.qmap.deinit();
             self.envd.deinit();
-            self.proxy_router.deinit();
             self.worker_discovery_service.deinit();
+            self.router.deinit();
         }
     };
 
@@ -45,6 +45,23 @@ pub const MainServer = struct {
         const id = iterator.next() orelse return error.InvalidTarget;
 
         return id;
+    }
+
+    const PipeError = error {
+        IoError,
+        NoData,
+    };
+
+    fn pipeData(origin: std.net.Stream, destination: std.net.Stream) PipeError!void {
+        const reader = origin.reader().any();
+        const writer = destination.writer().any();
+
+        var buffer: [4096]u8 = @splat(0);
+        const read_len = reader.read(buffer[0..]) catch return PipeError.IoError;
+
+        if (read_len == 0) return PipeError.NoData;
+
+        writer.writeAll(buffer[0..read_len]) catch return PipeError.IoError;
     }
 
     pub fn handle(connection: std.net.Server.Connection, srv_ctx: *Ctx) void {
@@ -115,8 +132,7 @@ pub const MainServer = struct {
             fd_logger.err(connection_fd, "couldn't get any rows: {}", .{ err });
             return;
         } orelse {
-            fd_logger.err(connection_fd,
-                          "no rows matched pg_path({s}) project_id({s}) truncated_target({s})", .{
+            fd_logger.err(connection_fd, "no rows matched pg_path({s}) project_id({s}) truncated_target({s})", .{
                 pg_path,
                 project_id,
                 target,
@@ -124,8 +140,8 @@ pub const MainServer = struct {
             return;
         };
 
+        // now we just need a healthy worker connection to handshake
         const worker_discovery_service = srv_ctx.worker_discovery_service;
-
         const woke_connection = worker_discovery_service.findConn() catch |err| {
             fd_logger.err(connection_fd, "couldnt establish a worker connection: {}", .{ err });
             return;
@@ -139,95 +155,27 @@ pub const MainServer = struct {
         });
 
         woke_connection.handshake(woke_payload) catch |err| {
-            fd_logger.err(connection_fd,
-                          "couldnt perform handshake over the worker connection: {}", .{ err });
+            fd_logger.err(connection_fd, "couldnt perform handshake over the worker connection: {}", .{ err });
             return;
         };
 
-        fd_logger.info(connection_fd,
-                       "handshake succesful!", .{});
+        fd_logger.info(connection_fd, "handshake succesful!", .{});
 
+        // after the handshake, the worker still needs the original http header
         woke_connection.stream.writeAll(ready_server.read_buffer[0..ready_server.read_buffer_len]) catch |err| {
             fd_logger.err(connection_fd, "couldnt write http to worker: {}", .{ err });
             return;
         };
 
-        fd_logger.info(connection_fd,
-                       "sent http header to worker", .{});
+        fd_logger.info(connection_fd, "sent http header to worker", .{});
 
-        const epoll_instance_fd = std.posix.epoll_create1(0) catch unreachable;
-
-        fd_logger.info(connection_fd,
-                       "created new epoll instance", .{});
-
-        var web_conn_event = std.os.linux.epoll_event{
-            .data = .{ .fd = connection.stream.handle },
-            .events = std.os.linux.EPOLL.IN,
-        };
-
-        std.posix.epoll_ctl(epoll_instance_fd, std.os.linux.EPOLL.CTL_ADD, connection.stream.handle, &web_conn_event) catch |err| {
-            fd_logger.err(connection_fd, "couldnt invoke epoll ctl: {}", .{ err });
+        // we finally delegate the connections to the forward router and wait
+        var conn_worker_waiter: forward_router.Promise = .{};
+        srv_ctx.router.addPipe(&connection.stream, &woke_connection.stream, &conn_worker_waiter) catch |err| {
+            fd_logger.err(connection_fd, "couldnt route connection->worker: {}", .{ err });
             return;
         };
 
-        fd_logger.info(connection_fd,
-                       "added http conn to epoll", .{});
-
-        var worker_conn_event = std.os.linux.epoll_event{
-            .data = .{ .fd = woke_connection.stream.handle },
-            .events = std.os.linux.EPOLL.IN,
-        };
-
-        std.posix.epoll_ctl(epoll_instance_fd, std.os.linux.EPOLL.CTL_ADD, woke_connection.stream.handle, &worker_conn_event) catch |err| {
-            fd_logger.err(connection_fd, "couldnt invoke epoll ctl: {}", .{ err });
-            return;
-        };
-
-        fd_logger.info(connection_fd,
-                       "added worker conn to epoll", .{});
-
-        var epoll_returned_events_buffer: [8]std.os.linux.epoll_event = undefined;
-
-        spin_on_data: while (true) {
-            fd_logger.info(connection_fd,
-                           "waiting for data...", .{});
-
-            const epoll_returned_events = events_blk: {
-                const events_size = std.posix.epoll_wait(epoll_instance_fd, epoll_returned_events_buffer[0..], 1000);
-                break :events_blk epoll_returned_events_buffer[0..events_size];
-            };
-
-            if (epoll_returned_events.len == 0) {
-                fd_logger.info(connection_fd,
-                               "conn is ready but no data was received, goodbye!", .{});
-                break :spin_on_data;
-            }
-
-            for (epoll_returned_events) |returned_event| {
-                const fd = returned_event.data.fd;
-
-                if (returned_event.events == std.os.linux.EPOLL.HUP) {
-                    break :spin_on_data;
-                }
-
-                if (fd == connection.stream.handle) {
-                    proxy.pipeData(connection.stream, woke_connection.stream) catch |err| {
-                        fd_logger.err(connection_fd, "pipe io error: {}", .{
-                            err,
-                        });
-
-                        break :spin_on_data;
-                    };
-                } else if (fd == woke_connection.stream.handle) {
-                    proxy.pipeData(woke_connection.stream, connection.stream) catch |err| {
-                        fd_logger.err(connection_fd, "pipe io error: {}", .{
-                            err,
-                        });
-
-                        break :spin_on_data;
-                    };
-                }
-            }
-        }
+        conn_worker_waiter.wait();
     }
 };
