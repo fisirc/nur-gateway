@@ -79,27 +79,24 @@ pub const Router = struct {
     }
 
     const DiscardError = error {
-        NoMatchingLock,
-        NoMatchingStream,
         EpollCtlErr,
     };
 
-    pub fn discardPipe(self: *Self, stream_ptr: *std.net.Stream) DiscardError!void {
-        // discarding routes is considered a "write lock" type of operation
-        self.enroute_lock.lock();
-        defer self.enroute_lock.unlock();
+    fn discardPipe(self: *Self, stream_ptr: *std.net.Stream) DiscardError!void {
+        // panics as this is an indicative of a race condition
+        const pair_ptr = self.stream_router.get(stream_ptr) orelse @panic("theres no matching stream in the router");
 
-        const pair_ptr = self.stream_router.get(stream_ptr) orelse return DiscardError.NoMatchingStream;
         _ = self.stream_router.remove(stream_ptr);
         _ = self.stream_router.remove(pair_ptr);
 
         std.posix.epoll_ctl(self.epoll_fd, std.os.linux.EPOLL.CTL_DEL, stream_ptr.handle, null) catch return DiscardError.EpollCtlErr;
         std.posix.epoll_ctl(self.epoll_fd, std.os.linux.EPOLL.CTL_DEL, pair_ptr.handle, null) catch return DiscardError.EpollCtlErr;
 
-        const promise_ptr = self.conds_router.get(stream_ptr) orelse return DiscardError.NoMatchingLock;
-        _ = self.conds_router.remove(stream_ptr);
+        // panics as this is an indicative of a race condition
+        const promise_ptr = self.conds_router.get(stream_ptr) orelse @panic("theres no matching lock for the stream");
 
-        if (self.conds_router.remove(pair_ptr) == false) return DiscardError.NoMatchingLock;
+        _ = self.conds_router.remove(stream_ptr);
+        _ = self.conds_router.remove(pair_ptr);
 
         // after removing the stream, we return the control to the routing thread to close it or whatever
         promise_ptr.finish();
@@ -137,7 +134,7 @@ pub const Router = struct {
 pub fn watchForward(router: *Router) void {
     const events_buffer = router.alloc.alloc(EpollEvent, events_buffersize) catch |err| {
         std.log.err("couldnt alloc the events buffer: {}", .{ err });
-        unreachable;
+        @panic("events buffer creation failed");
     };
 
     defer router.alloc.free(events_buffer);
@@ -151,11 +148,15 @@ pub fn watchForward(router: *Router) void {
         // get the reader lock before actually waiting, we consider
         // waiting a "reading" operation on the epoll instance
         router.enroute_lock.lockShared();
+        defer router.enroute_lock.unlockShared();
+
         const epoll_returned_events = router.epollWait(events_buffer);
-        router.enroute_lock.unlockShared();
 
         handle_events_loop: for (epoll_returned_events) |returned_event| {
             const stream_ptr: *std.net.Stream = @ptrFromInt(returned_event.data.ptr);
+
+            // this means that the stream has probably already been discarded
+            if (!router.stream_router.contains(stream_ptr)) continue;
 
             // this block should only return on error, otherwise
             // the flow should go back to the "handle events" loop
@@ -166,6 +167,7 @@ pub fn watchForward(router: *Router) void {
                 // - EPOLLHUP: the peer closed its end of the channel
                 // - EPOLLERR: error condition happened on the associated file descriptor
                 if (returned_event.events & (std.os.linux.EPOLL.HUP | std.os.linux.EPOLL.ERR) != 0) {
+                    std.log.err("connection with fd {} was closed", .{ stream_ptr.handle });
                     break :event_pipe error.StreamClosed;
                 }
 
@@ -187,9 +189,8 @@ pub fn watchForward(router: *Router) void {
 
             std.log.err("there was a pipe error: {}, the stream will be closed", .{ pipe_err });
 
-            router.discardPipe(stream_ptr) catch |err| {
-                std.log.err("couldnt discard the stream: {}", .{ err });
-                unreachable;
+            router.discardPipe(stream_ptr) catch {
+                @panic("couldnt discard the stream");
             };
 
             continue :handle_events_loop;

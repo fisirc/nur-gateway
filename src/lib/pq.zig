@@ -1,7 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
-pub const bindings = @import("pq/binds.zig");
+pub const c = @import("pq/binds.zig");
 
 pub const ExecError = error {
     IsNull,
@@ -70,43 +70,43 @@ const QueryResult = struct {
     const Self = @This();
 
     /// you are not supposed to use this field directly outside ffi necessities
-    _ffi_result: *bindings.PGresult,
+    _c_result: *c.PGresult,
 
     /// clears the storage of a `result` including result values
     pub fn clear(self: Self) void {
-        bindings.PQclear(self._ffi_result);
+        c.PQclear(self._c_result);
     }
 
     /// returns the result status code to check for errors
     pub fn status(self: Self) ExecStatus {
-        return switch(bindings.PQresultStatus(self._ffi_result)) {
-            bindings.PGRES_EMPTY_QUERY => ExecStatus.empty_query,
-            bindings.PGRES_COMMAND_OK => ExecStatus.command_ok,
-            bindings.PGRES_TUPLES_OK  => ExecStatus.tuples_ok,
-            bindings.PGRES_COPY_OUT  => ExecStatus.copy_out,
-            bindings.PGRES_COPY_IN  => ExecStatus.copy_in,
-            bindings.PGRES_BAD_RESPONSE  => ExecStatus.bad_response,
-            bindings.PGRES_NONFATAL_ERROR  => ExecStatus.nonfatal_error,
-            bindings.PGRES_FATAL_ERROR  => ExecStatus.fatal_error,
-            bindings.PGRES_COPY_BOTH  => ExecStatus.copy_both,
-            bindings.PGRES_SINGLE_TUPLE  => ExecStatus.single_tuple,
-            bindings.PGRES_TUPLES_CHUNK  => ExecStatus.tuples_chunk,
-            bindings.PGRES_PIPELINE_SYNC  => ExecStatus.pipeline_sync,
-            bindings.PGRES_PIPELINE_ABORTED  => ExecStatus.pipeline_aborted,
+        return switch(c.PQresultStatus(self._c_result)) {
+            c.PGRES_EMPTY_QUERY => ExecStatus.empty_query,
+            c.PGRES_COMMAND_OK => ExecStatus.command_ok,
+            c.PGRES_TUPLES_OK  => ExecStatus.tuples_ok,
+            c.PGRES_COPY_OUT  => ExecStatus.copy_out,
+            c.PGRES_COPY_IN  => ExecStatus.copy_in,
+            c.PGRES_BAD_RESPONSE  => ExecStatus.bad_response,
+            c.PGRES_NONFATAL_ERROR  => ExecStatus.nonfatal_error,
+            c.PGRES_FATAL_ERROR  => ExecStatus.fatal_error,
+            c.PGRES_COPY_BOTH  => ExecStatus.copy_both,
+            c.PGRES_SINGLE_TUPLE  => ExecStatus.single_tuple,
+            c.PGRES_TUPLES_CHUNK  => ExecStatus.tuples_chunk,
+            c.PGRES_PIPELINE_SYNC  => ExecStatus.pipeline_sync,
+            c.PGRES_PIPELINE_ABORTED  => ExecStatus.pipeline_aborted,
 
-            else => unreachable,
+            else => @panic("illegal exec status code"),
         };
     }
 
     /// returns the number of rows returned into some query result
     pub fn rowsLen(self: Self) usize {
-        const n_tuples: c_int = bindings.PQntuples(self._ffi_result);
+        const n_tuples: c_int = c.PQntuples(self._c_result);
         return @intCast(n_tuples);
     }
 
     /// return the value located at column `col_idx` of the row `row_idx` (starting at 0) from the result (which owns the memory)
     pub fn getValueAt(self: Self, row_idx: usize, col_idx: usize) []const u8 {
-        const value_textformat = bindings.PQgetvalue(self._ffi_result, @intCast(row_idx), @intCast(col_idx));
+        const value_textformat = c.PQgetvalue(self._c_result, @intCast(row_idx), @intCast(col_idx));
         const value_textlength = std.mem.len(value_textformat);
         return value_textformat[0..value_textlength];
     }
@@ -116,12 +116,12 @@ pub const Conn = struct {
     const Self = @This();
 
     /// you are not supposed to use this field directly outside ffi necessities
-    _ffi_conn: *bindings.PGconn,
+    _c_conn: *c.PGconn,
 
     /// establishes a connection to the db and returns a connection pointer
     pub fn fromUriZ(uri: [:0]const u8) ConnError!Self {
         const new_connection = Self{
-            ._ffi_conn = bindings.PQconnectdb(uri.ptr) orelse return ConnError.BadConnection,
+            ._c_conn = c.PQconnectdb(uri.ptr) orelse return ConnError.BadConnection,
         };
 
         const connection_status = new_connection.status();
@@ -141,13 +141,13 @@ pub const Conn = struct {
 
     /// finish the connection and free the related resources
     pub fn finish(self: Self) void {
-        bindings.PQfinish(self._ffi_conn);
+        c.PQfinish(self._c_conn);
     }
 
     pub fn status(self: Self) ConnStatus {
-        return switch (bindings.PQstatus(self._ffi_conn)) {
-            bindings.CONNECTION_OK => .connection_ok,
-            bindings.CONNECTION_BAD => .connection_bad,
+        return switch (c.PQstatus(self._c_conn)) {
+            c.CONNECTION_OK => .connection_ok,
+            c.CONNECTION_BAD => .connection_bad,
             else => .unknown,
         };
     }
@@ -156,14 +156,14 @@ pub const Conn = struct {
     /// connection, null if none. The connection underlyingly "owns" the memory, it
     /// gets freed with it at finish
     pub fn getErrorMessage(self: Self) ?[]const u8 {
-        const error_message = bindings.PQerrorMessage(self._ffi_conn);
+        const error_message = c.PQerrorMessage(self._c_conn);
         const error_len = std.mem.len(error_message);
         return error_message[0..error_len];
     }
 
     pub fn execQueryZ(self: Self, query: [:0]u8) ExecError!*QueryResult {
-        const query_result: *QueryResult = bindings.PQexec(self._ffi_conn, query) orelse ExecError.IsNull;
-        if (bindings.PQresultStatus(query_result) != bindings.PGRES_TUPLES_OK) {
+        const query_result: *QueryResult = c.PQexec(self._c_conn, query) orelse ExecError.IsNull;
+        if (c.PQresultStatus(query_result) != c.PGRES_TUPLES_OK) {
             return ExecError.QueryError;
         }
 
@@ -176,7 +176,7 @@ pub const Conn = struct {
         const n_params = params_fields_typeinfo.len;
 
         // inferred
-        const param_types: ?[*]bindings.Oid = null;
+        const param_types: ?[*]c.Oid = null;
 
         // we will use the text format for all param values to avoid binary enc/dec
         // problems
@@ -214,8 +214,8 @@ pub const Conn = struct {
                 }) catch return ExecError.QueryOutOfMemory).ptr;
         }
 
-        const query_result_ffi = bindings.PQexecParams(
-            self._ffi_conn,
+        const query_result_ffi = c.PQexecParams(
+            self._c_conn,
             query,
             n_params,
             param_types,
@@ -226,7 +226,7 @@ pub const Conn = struct {
         ) orelse return ExecError.IsNull;
 
         const query_result = QueryResult{
-            ._ffi_result = query_result_ffi,
+            ._c_result = query_result_ffi,
         };
 
         if (query_result.status() != ExecStatus.tuples_ok) {

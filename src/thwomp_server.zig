@@ -7,28 +7,46 @@ const dbutils = @import("lib/dbutils.zig");
 const uuid = @import("lib/uuid.zig");
 const fd_logger = @import("lib/fd_logger.zig");
 const forward_router = @import("lib/forward_route.zig");
+const validate = @import("lib/validate.zig");
 
-const QueueMap = @import("queues.zig").SyncQueueMap;
 const EnvMap = std.process.EnvMap;
 
 pub const MainServer = struct {
     pub const Ctx = struct {
-        qmap: QueueMap,
         envd: EnvMap,
         worker_discovery_service: worker_discovery.WorkerDiscovery,
         router: forward_router.Router,
 
-        pub fn init(alloc: std.mem.Allocator) !@This() {
+        pub fn init(alloc: std.mem.Allocator) @This() {
+            const env = dotenv.loadEnv(512, ".env", alloc) catch |err| switch (err) {
+                std.fs.File.OpenError.FileNotFound => std.process.getEnvMap(alloc) catch @panic("couldn't acquire envmap"),
+                else => @panic("couldn't parse provided envfile"),
+            };
+
+            validate.env(env, &.{
+                "PG_URL",
+                "SV_HOSTNAME",
+                "SV_PORT",
+                "WORKER_HOSTNAME",
+                "WORKER_PORT",
+            });
+
             return @This(){
-                .qmap = try QueueMap.init(alloc),
-                .envd = try dotenv.loadEnv(512, ".env", alloc),
-                .worker_discovery_service = try worker_discovery.WorkerDiscovery.init(alloc),
-                .router = try forward_router.Router.init(alloc),
+                .envd = env,
+
+                .worker_discovery_service = worker_discovery.WorkerDiscovery.init(alloc, env) catch |err| {
+                    std.log.err("couldn't init the worker discovery structure: {}", .{ err });
+                    @panic("worker discovery init process errored");
+                },
+
+                .router = forward_router.Router.init(alloc) catch |err| {
+                    std.log.err("couldn't init the forward router structure: {}", .{ err });
+                    @panic("forward router init process errored");
+                },
             };
         }
 
         pub fn deinit(self: *@This()) void {
-            self.qmap.deinit();
             self.envd.deinit();
             self.worker_discovery_service.deinit();
             self.router.deinit();
@@ -51,18 +69,6 @@ pub const MainServer = struct {
         IoError,
         NoData,
     };
-
-    fn pipeData(origin: std.net.Stream, destination: std.net.Stream) PipeError!void {
-        const reader = origin.reader().any();
-        const writer = destination.writer().any();
-
-        var buffer: [4096]u8 = @splat(0);
-        const read_len = reader.read(buffer[0..]) catch return PipeError.IoError;
-
-        if (read_len == 0) return PipeError.NoData;
-
-        writer.writeAll(buffer[0..read_len]) catch return PipeError.IoError;
-    }
 
     pub fn handle(connection: std.net.Server.Connection, srv_ctx: *Ctx) void {
         defer libthwomp.ioutils.closeConnection(connection);
@@ -110,7 +116,7 @@ pub const MainServer = struct {
         var ready_server = std.http.Server.init(connection, header_buffer[0..]);
         const request_with_header = ready_server.receiveHead() catch |err| {
             fd_logger.err(connection_fd, "couldn't receive http header from connection: {}", .{ err });
-            unreachable;
+            @panic("connection failed to provide an http header");
         };
 
         const raw_http_target = request_with_header.head.target;

@@ -3,8 +3,7 @@
 <img src="./docs/media/thwomp.webp" alt="super mario thwomp"
 align="right" width="200" />
 
-API gateway service of the Nur project, low-dependencies and
-linux-only! :3c
+API gateway service of the Nur project, low-deps and Linux-only! :3c
 
 ### BUILDING
 
@@ -22,6 +21,16 @@ Debug builds are built like this:
 zig build
 ```
 
+If you're on nix, this project provides both a dev shell and a default package for x86_64:
+
+```sh
+nix develop
+```
+
+```sh
+nix build
+```
+
 ### CONFIGURATION
 
 Some runtime parameters can be set through an `.env` file:
@@ -30,6 +39,8 @@ Some runtime parameters can be set through an `.env` file:
 PG_URL="<postgres-uri>"
 SV_PORT="<desired-port>"
 SV_HOSTNAME="<desired-hostname>"
+WORKER_HOSTNAME="<desired-hostname>"
+WORKER_PORT="<desired-port>"
 ```
 
 ### INNERS

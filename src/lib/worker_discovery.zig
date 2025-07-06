@@ -72,7 +72,7 @@ pub const WorkerConn = struct {
     fn handshakeV2(self: Self, payload: PayloadV2) !void {
         _ = self;
         _ = payload;
-        unreachable;
+        @panic("not implemented");
     }
 
     pub fn handshake(self: Self, payload: Payload) !void {
@@ -89,13 +89,21 @@ pub const WorkerDiscovery = struct {
     worker_infolist: std.ArrayList(std.net.Address),
     alloc: std.mem.Allocator,
 
-    pub fn init(alloc: std.mem.Allocator) !Self {
+    pub fn init(alloc: std.mem.Allocator, env: std.process.EnvMap) !Self {
         var ret = Self{
             .worker_infolist = std.ArrayList(std.net.Address).init(alloc),
             .alloc = alloc,
         };
 
-        var addr_list = try std.net.getAddressList(alloc, "localhost", 6969);
+        const worker_hostname = env.get("WORKER_HOSTNAME") orelse "localhost";
+        const worker_port = env.get("WORKER_PORT") orelse "6969";
+
+        var addr_list = try std.net.getAddressList(
+            alloc,
+            worker_hostname,
+            try std.fmt.parseUnsigned(u16, worker_port, 10),
+        );
+
         defer addr_list.deinit();
 
         if (addr_list.addrs.len == 0) return error.NoWorkerAddr;

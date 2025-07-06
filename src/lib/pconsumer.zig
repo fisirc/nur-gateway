@@ -59,7 +59,7 @@ pub fn push_to_queue(T: type) fn (*Queue(T)) void {
         pub fn Fn(queue: *Queue(T)) void {
             std.Thread.sleep(5 * std.time.ns_per_s);
             std.debug.print("pushing!\n", .{});
-            _ = queue.pushMsg(T{}) catch unreachable;
+            _ = queue.pushMsg(T{}) catch @panic("message pushing failed");
             std.debug.print("pushed!\n", .{});
         }
     }).Fn;
