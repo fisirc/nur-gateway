@@ -116,7 +116,7 @@ pub const MainServer = struct {
         var ready_server = std.http.Server.init(connection, header_buffer[0..]);
         const request_with_header = ready_server.receiveHead() catch |err| {
             fd_logger.err(connection_fd, "couldn't receive http header from connection: {}", .{ err });
-            @panic("connection failed to provide an http header");
+            return;
         };
 
         const raw_http_target = request_with_header.head.target;

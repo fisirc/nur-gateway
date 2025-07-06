@@ -30,7 +30,7 @@
 
             ls -la $TMPDIR/cache
 
-            zig build -Doptimize=ReleaseSafe --system $ZIG_GLOBAL_CACHE_DIR
+            zig build --system $ZIG_GLOBAL_CACHE_DIR
             '';
 
         installPhase = ''
