@@ -8,6 +8,6 @@ WORKDIR /app
 COPY . .
 RUN nix build
 
-CMD [ "./result/bin/thwomp" ]
+CMD [ "/bin/sh", "-c", "./result/bin/thwomp 2>&1" ]
 
 
