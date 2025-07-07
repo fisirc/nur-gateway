@@ -75,14 +75,6 @@ pub const MainServer = struct {
 
         const connection_fd = connection.stream.handle;
 
-        libthwomp.ioutils.configHandleNoblock(connection) catch |err| {
-            fd_logger.err(connection_fd, "couldn't configure socket into non blocking: {}", .{
-                err,
-            });
-
-            return;
-        };
-
         var gpa: std.heap.GeneralPurposeAllocator(.{
             .thread_safe = true,
         }) = .init;
@@ -120,6 +112,16 @@ pub const MainServer = struct {
         };
 
         const raw_http_target = request_with_header.head.target;
+
+        // the connection is made non blocking only once the head has already been received
+        libthwomp.ioutils.configHandleNoblock(connection) catch |err| {
+            fd_logger.err(connection_fd, "couldn't configure socket into non blocking: {}", .{
+                err,
+            });
+
+            return;
+        };
+
 
         // every (method, target) pair should correspond to a single function id
         // which will then be passed down to the worker
