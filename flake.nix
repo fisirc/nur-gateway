@@ -31,7 +31,7 @@
             ls -la $TMPDIR/cache
 
             zig build --system $ZIG_GLOBAL_CACHE_DIR
-            '';
+        '';
 
         installPhase = ''
             mkdir -p $out/bin
