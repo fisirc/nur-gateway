@@ -30,13 +30,13 @@
 
             ls -la $TMPDIR/cache
 
-            zig build --system $ZIG_GLOBAL_CACHE_DIR
+            zig build -Doptimize=ReleaseSafe --system $ZIG_GLOBAL_CACHE_DIR
         '';
 
         installPhase = ''
             mkdir -p $out/bin
             cp zig-out/bin/* $out/bin/
-            '';
+        '';
       };
 
       devShells.x86_64-linux.default = pkgs.mkShell {

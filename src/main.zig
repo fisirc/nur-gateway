@@ -22,10 +22,13 @@ pub fn main() !void {
     std.log.info("spawning router thread", .{});
     _ = std.Thread.spawn(.{}, forward_router.watchForward, .{
         &server_ctx.router,
-    }) catch {
+    }) catch |err| {
+        std.log.err("error spawning forward router thread: {}", .{ err });
         @panic("couldnt spawn the forward router");
     };
 
+    // non null as they were previously validated, maybe the validator
+    // api will change in the future
     const env_hostname = server_ctx.envd.get("SV_HOSTNAME").?;
     const env_port = server_ctx.envd.get("SV_PORT").?;
 
