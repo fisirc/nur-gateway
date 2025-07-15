@@ -1,7 +1,4 @@
-## Thwomp
-
-<img src="./docs/media/thwomp.webp" alt="super mario thwomp"
-align="right" width="200" />
+## The Gateway™
 
 API gateway service of the Nur project, low-deps and Linux-only! :3c
 

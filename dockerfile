@@ -8,6 +8,6 @@ WORKDIR /app
 COPY . .
 RUN nix build
 
-CMD [ "/bin/sh", "-c", "./result/bin/thwomp 2>&1" ]
+CMD [ "./result/bin/nur-gateway" ]
 
 

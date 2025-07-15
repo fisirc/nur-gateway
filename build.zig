@@ -45,7 +45,7 @@ pub fn build(b: *std.Build) void {
     exe_mod.addImport("dotenv", dotenv_mod);
 
     const exe = b.addExecutable(.{
-        .name = "thwomp",
+        .name = "nur-gateway",
         .root_module = exe_mod,
     });
 

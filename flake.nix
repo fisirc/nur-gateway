@@ -12,7 +12,7 @@
       deps = pkgs.callPackage ./build.zig.zon.nix {};
     in {
       packages.x86_64-linux.default = pkgs.stdenv.mkDerivation {
-        pname = "thwomp";
+        pname = "nur-gateway";
         version = "1.0.0";
         src = ./.;
 
